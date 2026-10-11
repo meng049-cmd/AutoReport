@@ -18,5 +18,10 @@ with sqlite3.connect(f'file:{autoreport.DEFAULT_DB}?mode=ro', uri=True) as db:
             'keys': [list(r) for r in db.execute('SELECT kind,value,record_id FROM lookup_keys ORDER BY kind,value,record_id')]}
 metadata = autoreport.ROOT / 'data' / 'database-update.json'
 data['database_update'] = json.loads(metadata.read_text(encoding='utf-8')) if metadata.exists() else None
+inputs = autoreport.ROOT / 'database-inputs'
+data['uploaded_files'] = [{'name': file.name, 'path': file.relative_to(autoreport.ROOT).as_posix(),
+                          'size': file.stat().st_size}
+                         for file in sorted(inputs.rglob('*')) if file.is_file() and file.suffix.lower() == '.xlsx']
+data['source_files'] = sorted({r['source_file'] for r in records})
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')

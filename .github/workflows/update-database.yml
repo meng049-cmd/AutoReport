@@ -68,10 +68,8 @@ jobs:
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
       - name: Publish the rebuilt website
-        if: steps.save.outputs.changed == 'true'
         run: .venv/bin/python web/publish_pages.py
       - name: Request a GitHub Pages build
-        if: steps.save.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

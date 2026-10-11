@@ -37,4 +37,28 @@ $('export').onclick=()=>{
  try{const a=document.createElement('a');a.href=downloadUrl;a.download=lastFile.name.replace(/\.(xlsx|csv)$/i,'')+'_IC機種.xlsx';document.body.appendChild(a);a.click();a.remove();$('message').textContent='已送出下載：'+a.download+'。若沒有出現，請檢查瀏覽器的下載清單或下載權限。';}catch(e){error(e)}
 };
 
-call('stats').then(s=>{$('sheetCount').textContent=new Set(s['分頁'].map(r=>r.name)).size;const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。';$('orderCount').textContent=s['不重複工單'].toLocaleString();$('pairCount').textContent=s['機種IC組合'];$('sources').innerHTML=table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows]));for(const id of ['lookup','match','fulltext'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}).catch(error);
+let uploadedFiles=[],sourceFiles=[],filesReady=false;
+function renderUploadedFiles(){
+ const query=$('uploadedFileFilter').value.trim().normalize('NFKC').toLowerCase();
+ const known=new Set(uploadedFiles.map(f=>f.name));
+ const rows=[...uploadedFiles.map(f=>({...f,kind:'已存於 GitHub'})),...sourceFiles.filter(name=>!known.has(name)).map(name=>({name,kind:'既有資料庫來源'}))];
+ const filtered=rows.filter(f=>f.name.normalize('NFKC').toLowerCase().includes(query));
+ const exact=query&&rows.some(f=>f.name.normalize('NFKC').toLowerCase()===query);
+ $('uploadedFiles').innerHTML=(exact?'<p class="warn">已有同名檔案，請確認後再上傳；若要保留兩份檔案，請先改名。</p>':'')+table(['檔名','狀態','大小','查看'],filtered.map(f=>[esc(f.name),esc(f.kind),f.size==null?'—':esc((f.size/1024).toFixed(1)+' KB'),f.path?'<a target="_blank" rel="noopener noreferrer" href="https://github.com/meng049-cmd/AutoReport/blob/codex/autoreport-database/'+f.path.split('/').map(encodeURIComponent).join('/')+'">查看檔案</a>':'—']))+(!filtered.length?'<p>沒有符合的檔名。</p>':'');
+}
+async function refreshUploadedFiles(){
+ if(!filesReady)return;
+ $('refreshUploadedFiles').disabled=true;$('uploadedFilesStatus').textContent='正在向 GitHub 取得最新檔案清單…';
+ try{
+  const response=await fetch('https://api.github.com/repos/meng049-cmd/AutoReport/git/trees/codex%2Fautoreport-database?recursive=1',{cache:'no-store',signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Error('GitHub 清單暫時無法讀取');
+  const data=await response.json();if(data.truncated||!Array.isArray(data.tree))throw Error('GitHub 清單不完整');
+  uploadedFiles=data.tree.filter(f=>f.type==='blob'&&f.path.startsWith('database-inputs/')&&/\.xlsx$/i.test(f.path)).map(f=>({name:f.path.split('/').at(-1),path:f.path,size:f.size}));
+  renderUploadedFiles();$('uploadedFilesStatus').textContent='GitHub 最新清單：'+uploadedFiles.length+' 份 Excel。';
+ }catch{
+  renderUploadedFiles();$('uploadedFilesStatus').textContent='目前顯示最近取得的清單。無法讀取 GitHub 最新清單時，請點「在 GitHub 查看全部檔案」確認最新內容。';
+ }finally{$('refreshUploadedFiles').disabled=false;}
+}
+$('uploadedFileFilter').oninput=renderUploadedFiles;
+$('refreshUploadedFiles').onclick=refreshUploadedFiles;
+call('stats').then(s=>{uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];filesReady=true;renderUploadedFiles();refreshUploadedFiles();$('sheetCount').textContent=new Set(s['分頁'].map(r=>r.name)).size;const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。';$('orderCount').textContent=s['不重複工單'].toLocaleString();$('pairCount').textContent=s['機種IC組合'];$('sources').innerHTML=table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows]));for(const id of ['lookup','match','fulltext'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}).catch(error);

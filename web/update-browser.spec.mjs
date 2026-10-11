@@ -22,10 +22,19 @@ test('updated reference database works in the browser and preserves Detail downl
  let browser;
  try{
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
-  const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  const page=await browser.newPage();let listUnavailable=false;
+  await page.route('https://api.github.com/**',route=>listUnavailable?route.fulfill({status:403,body:'rate limit'}):route.fulfill({json:{truncated:false,tree:[{type:'blob',path:'database-inputs/原始對照.xlsx',size:1024},{type:'blob',path:'database-inputs/README.md',size:300}]}}));
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(()=>!document.querySelector('#match').disabled);
   assert.equal(await page.locator('#orderCount').innerText(),data.stats['不重複工單'].toLocaleString('en-US'));
   assert.match(await page.locator('#databaseUpload').getAttribute('href'),/github\.com\/meng049-cmd\/AutoReport\/upload\/codex\/autoreport-database\/database-inputs$/);
+  await page.waitForFunction(()=>document.querySelector('#uploadedFilesStatus').textContent==='GitHub 最新清單：1 份 Excel。');
+  assert.match(await page.locator('#uploadedFiles').innerText(),/原始對照.xlsx/);
+  await page.locator('#uploadedFileFilter').fill('原始對照.xlsx');
+  assert.match(await page.locator('#uploadedFiles').innerText(),/已有同名檔案/);
+  listUnavailable=true;await page.locator('#refreshUploadedFiles').click();
+  await page.waitForFunction(()=>document.querySelector('#uploadedFilesStatus').textContent.includes('無法讀取 GitHub 最新清單'));
+  assert.match(await page.locator('#uploadedFiles').innerText(),/原始對照.xlsx/);
   const book=new ExcelJS.Workbook(),detail=book.addWorksheet('Detail');
   detail.addRow(['製程','工單','料號','品名','小板','時間','人員','不良','狀態']);
   detail.addRow(['保留',order,'','測試','','','','','Good']);

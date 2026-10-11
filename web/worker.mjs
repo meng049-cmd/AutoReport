@@ -5,7 +5,7 @@ const ready=fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'
 self.onmessage=async({data:{id,type,payload}})=>{
   try{
     await ready;let result;
-    if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update};
+    if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
     else if(type==='match'){lastResult=null;lastResult=await matchFile(matcher,payload.bytes,payload.filename);const {detailBytes,...summary}=lastResult;result=summary;}
