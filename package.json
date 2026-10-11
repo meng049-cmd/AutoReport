@@ -5,15 +5,16 @@
   "type": "module",
   "scripts": {
     "build": "node web/build.mjs",
-    "test": "node --test web/matcher.test.mjs",
+    "test": "node --test web/matcher.test.mjs web/detail.test.mjs",
     "test:browser": "node --test web/browser.spec.mjs"
   },
   "dependencies": {
     "exceljs": "4.4.0",
+    "jszip": "3.10.1",
     "opencc-js": "1.4.2"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "@playwright/test": "1.64.0"
+    "@playwright/test": "1.64.0",
+    "esbuild": "0.28.2"
   }
 }

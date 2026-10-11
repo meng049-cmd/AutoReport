@@ -1,0 +1,79 @@
+name: Update reference database
+on:
+  push:
+    branches: [codex/autoreport-database]
+    paths: ['database-inputs/**.xlsx']
+permissions:
+  contents: write
+  pages: write
+concurrency:
+  group: autoreport-database-update
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install -r requirements.txt
+      - run: npm ci
+      - name: Append new Excel mappings, skipping duplicates
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'web')
+          from update_database import append_excel
+          before = os.environ['BEFORE']
+          if set(before) == {'0'}:
+              raise SystemExit('Upload an Excel to the existing source branch, not a new branch.')
+          names = subprocess.check_output(['git','diff','--name-only','--diff-filter=AM','-z',before,os.environ['GITHUB_SHA']], text=True).split('\0')
+          files = [Path(name) for name in names if name.startswith('database-inputs/') and name.lower().endswith('.xlsx')]
+          if len(files) != 1:
+              raise SystemExit('Please upload exactly one Excel reference workbook per commit.')
+          result = append_excel('data/autoreport.sqlite3', files[0], 'data/database-update.json', os.environ['GITHUB_SHA'])
+          import json
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+              report.write('## Database update\n\n```json\n'+json.dumps(result,ensure_ascii=False,indent=2)+'\n```\n')
+          PY
+      - run: .venv/bin/python -m unittest -v
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: node --test web/update-browser.spec.mjs
+      - name: Save database additions to the source branch
+        id: save
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/autoreport.sqlite3
+          if test -f data/database-update.json; then git add data/database-update.json; fi
+          if git diff --cached --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'No new mappings; database and update time are unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            git commit -m 'Append new reference mappings (skip duplicates)'
+            git push origin HEAD:refs/heads/codex/autoreport-database
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish the rebuilt website
+        if: steps.save.outputs.changed == 'true'
+        run: .venv/bin/python web/publish_pages.py
+      - name: Request a GitHub Pages build
+        if: steps.save.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds"
+          echo 'Database and website files saved. GitHub Pages build requested; wait for the Pages deployment before refreshing the website.' >> "$GITHUB_STEP_SUMMARY"

@@ -29,7 +29,7 @@ npm run test:browser  # 需已安裝 Chromium；也可先 npx playwright install
 .venv/bin/python web/publish_pages.py
 ```
 
-建置會從既有 `data/autoreport.sqlite3` 匯出瀏覽器對照索引，不會重新匯入或改動資料庫。更新參考資料時仍使用下方 Python 匯入流程，完成檢查後重新建置及發布。純靜態網站沒有 Python API 相依；Excel 解析與比對在 Web Worker 內執行。
+建置會從既有 `data/autoreport.sqlite3` 匯出瀏覽器對照索引，不會重新匯入或改動資料庫。更新參考資料可使用網站的「上傳並更新資料庫（GitHub）」入口，將一份 Excel 提交到 database-inputs，GitHub Actions 會比對舊庫、追加新對照並發布。也可使用下方 Python 匯入流程。純靜態網站沒有 Python API 相依；Excel 解析與比對在 Web Worker 內執行。
 
 以下保留本機 Python 工具的使用說明。
 
@@ -148,3 +148,30 @@ python -m unittest -v
 
 測試包含指定分頁位於第 5–9 頁時仍選取正確來源、缺少指定頁時不寫入、每格只取第一筆、機種斜線保留、繁簡欄名、機型別名、第一筆 SAP 工單、重工 IC 交叉確認、料號版本、多組候選、合併欄位、重複匯入及 Excel／CSV 比對匯出。
 此次交付的 `data/autoreport.sqlite3` 和 `downloads/` 已依使用者同意提交 Git。`data/` 其他新檔案及 `exports/` 預設忽略；未來更新資料庫會改動已追蹤的資料檔，提交或上傳前請確認內容與目的地。
+
+## Detail 原檔補欄下載
+
+上傳含 `Detail` 分頁的 `.xlsx`，第一列為表頭，從第二列開始使用 B 欄工單、C 欄料號共同比對。唯一匹配時 J 欄填 IC、K 欄填機種；未匹配或有多組候選時留白，畫面顯示原因。J/K 已有資料時停止，避免覆蓋。
+
+下載檔只修改 Detail 的 J/K 儲存格與必要的範圍資訊，保留 A–I 的值、公式、樣式和其他分頁。一般查詢檔仍可使用原本的比對結果匯出。
+
+驗證：`npm run build && npm test && npm run test:browser`。瀏覽器測試使用 `/usr/bin/chromium` 或 `BROWSER_EXECUTABLE` 指定的 Chromium。
+
+
+## 上傳 Excel 追加資料庫
+
+網站「上傳並更新資料庫（GitHub）」開啟 GitHub 原生上傳頁，沿用 GitHub 帳號與儲存庫權限，無須在網站輸入 token。一次提交一份 `.xlsx` 到 `codex/autoreport-database/database-inputs`，必須包含指定五頁。新增、更新同名 Excel 都會觸發 **Update reference database**。
+
+更新以既有 SQLite 的複本進行：解析五頁 → 按正規化的機種、IC、產品系列、料號集合、DPN 集合、工單集合比對，跨分頁的相同對照也會跳過 → 保留既有對照、追加新對照 → 完整性檢查 → 建置與瀏覽器下載驗證 → 將資料庫存回來源分支 → 發布 gh-pages 並明確請求 Pages build。GitHub Actions 自動提交不會自動觸發 Pages build，所以工作流程會使用 pages:write 權限發出 build 請求。
+
+相同工單或料號的新 IC／機種不覆蓋舊資料，查詢會保留多组候選，需人工確認。沒有新增對照時，資料庫與更新時間不變；原始 Excel 的上傳本身仍會留下 GitHub commit。缺頁、格式錯誤或測試失敗不會更換既有網站資料。若分支保護阻止 Actions 提交，需允許工作流程寫入來源分支；若停用 Actions，需先啟用。
+
+程式版本維持 `1.0.0`。資料更新時間與最近新增／跳過筆數存於 `data/database-update.json`，網站以台北時間顯示。來源檔與網站對照會保存在 GitHub／GitHub Pages，查詢檔不會因此上傳。
+
+本機等效命令：
+
+```sh
+.venv/bin/python web/update_database.py 原始對照.xlsx
+npm run build
+node --test web/update-browser.spec.mjs
+```

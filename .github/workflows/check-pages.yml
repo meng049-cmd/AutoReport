@@ -2,6 +2,7 @@ name: Check website
 on:
   push:
     branches: [main, codex/autoreport-database]
+    paths-ignore: ['database-inputs/**', 'data/**']
   pull_request:
 permissions:
   contents: read

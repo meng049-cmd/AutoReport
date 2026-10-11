@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import {text,matchTables} from './matcher.mjs';
 export const MAX_BYTES=20*1024*1024;
 function csvRows(s){
@@ -54,12 +55,64 @@ export async function inputTables(bytes,filename){
     return {name:sheet.name,raw,expanded};
   });
 }
-export async function matchFile(matcher,bytes,filename){return matchTables(matcher,await inputTables(bytes,filename),filename);}
+export async function matchFile(matcher,bytes,filename){
+  const tables=await inputTables(bytes,filename);
+  const detail=tables.find(t=>t.name==='Detail');
+  if(!detail)return matchTables(matcher,tables,filename);
+  const results=[];
+  for(let i=1;i<detail.raw.length;i++){
+    const row=detail.raw[i];if(!row.slice(0,9).some(Boolean))continue;
+    if(row.slice(9,11).some(Boolean))throw Error(`Detail 第 ${i+1} 列 J/K 已有資料，請先確認，避免覆蓋。`);
+    const criteria=[['order',detail.expanded[i][1]],['part',detail.expanded[i][2]]].filter(([,v])=>v);
+    const match=matcher.lookup(criteria),unique=match['狀態']==='唯一匹配'?match['候選'][0]:{};
+    results.push({'分頁':'Detail','列號':i+1,'原始資料':row.slice(0,9),'機種':unique['機種']||'',IC:unique.IC||'',...match});
+  }
+  return {'檔名':filename,'筆數':results.length,'提示':['僅比對 Detail 的 B（工單）／C（料號）；下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。'],'結果':results,detailBytes:bytes};
+}
 export async function exportMatches(result){
+  if(result.detailBytes)return exportDetail(result);
   const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('比對結果');
   sheet.addRow(['來源分頁','來源列號','比對狀態','機種','IC','候選機種與IC','查找條件','資料庫來源','原始資料']);
   for(const r of result['結果'])sheet.addRow([r['分頁'],r['列號'],r['狀態'],r['機種'],r.IC,JSON.stringify(r['候選']),JSON.stringify(r['查找條件']),JSON.stringify(r['查找依據']),JSON.stringify(r['原始資料'])]);
   sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter={from:'A1',to:`I${sheet.rowCount}`};
   [25,12,22,22,18,55,45,45,55].forEach((width,i)=>sheet.getColumn(i+1).width=width);
   return book.xlsx.writeBuffer();
+}
+
+// Patch only Detail worksheet XML; all other workbook entries and A–I cells stay intact.
+async function exportDetail(result){
+  const zip=await JSZip.loadAsync(result.detailBytes);
+  const workbook=await zip.file('xl/workbook.xml').async('string');
+  const tag=workbook.match(/<sheet\b[^>]*\bname="Detail"[^>]*\/?\s*>/)?.[0];
+  const id=tag?.match(/\br:id="([^"]+)"/)?.[1];
+  const rels=await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  const rel=rels.match(/<Relationship\b[^>]*>/g)?.find(t=>t.match(/\bId="([^"]+)"/)?.[1]===id);
+  const target=rel?.match(/\bTarget="([^"]+)"/)?.[1];
+  if(!target)throw Error('無法定位 Detail 分頁。');
+  const file=target.startsWith('/')?target.slice(1):'xl/'+target.replace(/^\.\//,'');
+  let xml=await zip.file(file).async('string');
+  const values=new Map([[1,['IC','機種']]]);
+  let lastRow=1;
+  for(const row of result['結果']){
+    values.set(row['列號'],[row.IC,row['機種']]);
+    lastRow=Math.max(lastRow,row['列號']);
+  }
+  const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  xml=xml.replace(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g,(original,attrs,body='')=>{
+    const n=Number(attrs.match(/\br="(\d+)"/)?.[1]);if(!values.has(n))return original;
+    const cells=values.get(n).map((v,i)=>`<c r="${i===0?'J':'K'}${n}" t="inlineStr"><is><t>${escape(v)}</t></is></c>`).join('');
+    body=body.replace(/<c\b[^>]*\br="[JK]\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,'');
+    const after=body.search(/<c\b[^>]*\br="(?:[L-Z]|[A-Z]{2,})\d+"/);
+    body=after<0?body+cells:body.slice(0,after)+cells+body.slice(after);
+    return `<row${attrs}>${body}</row>`;
+  });
+  xml=xml.replace(/<dimension\b[^>]*\bref="([^"]+)"[^>]*\/>/,(original,ref)=>{
+    const end=ref.split(':').at(-1).match(/^([A-Z]+)(\d+)$/);
+    if(!end)return original;
+    const col=[...end[1]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);
+    if(col>=11)return original;
+    return original.replace(`ref="${ref}"`,`ref="${ref.includes(':')?ref.split(':')[0]:'A1'}:K${Math.max(Number(end[2]),lastRow)}"`);
+  });
+  zip.file(file,xml);
+  return zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
 }
