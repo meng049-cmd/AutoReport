@@ -3,3 +3,7 @@ __pycache__/
 data/
 exports/
 *.log
+node_modules/
+dist/
+playwright-report/
+test-results/

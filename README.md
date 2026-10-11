@@ -1,4 +1,39 @@
-# AutoReport：工單機種與 IC 查找
+# AutoReport 工單 IC／機種比對
+
+## 線上網站（GitHub Pages）
+
+網站網址：https://meng049-cmd.github.io/AutoReport/
+
+第一次啟用：到 [儲存庫 Settings → Pages](https://github.com/meng049-cmd/AutoReport/settings/pages)，選擇 **Deploy from a branch**，分支選 **gh-pages**、目錄選 **/(root)**，按 Save。等待 GitHub 顯示部署完成後開啟上方網址。
+
+使用方式：上傳 `.xlsx` 或 `.csv` → **開始比對** → **匯出 Excel**。也可直接輸入工單號碼或完整產品料號查找。查詢範本可在網站下載。
+
+- 網站已帶入指定五頁的 385 筆對照資料、1,268 個不重複工單。
+- 來源只採用「工單（A16）」「CY26」「工單（CY24&25）」「重工工單1」「NPI」，繁簡頁名皆可辨識。
+- 每個儲存格只取第一筆；機型視為 IC 欄位；支援繁簡中文與全半形。
+- 上傳查詢檔會處理所有分頁。檔案留在瀏覽器內，不會傳到伺服器或寫入對照庫。
+- 唯一匹配才填入機種與 IC；多組候選、缺漏及條件衝突會分別標示並保留來源。
+- 不需安裝 SQLite 或其他資料庫外掛。網站中的對照資料屬於公開的 GitHub Pages 靜態內容。
+
+### 維護與更新網站
+
+程式原始碼在 `codex/autoreport-database` 分支；`gh-pages` 分支只放建置完成的網站。
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm ci
+npm run build
+npm test
+npm run test:browser  # 需已安裝 Chromium；也可先 npx playwright install chromium
+.venv/bin/python web/publish_pages.py
+```
+
+建置會從既有 `data/autoreport.sqlite3` 匯出瀏覽器對照索引，不會重新匯入或改動資料庫。更新參考資料時仍使用下方 Python 匯入流程，完成檢查後重新建置及發布。純靜態網站沒有 Python API 相依；Excel 解析與比對在 Web Worker 內執行。
+
+以下保留本機 Python 工具的使用說明。
+
+## 本機工單機種與 IC 查找
 
 已依使用者圖一重建 SQLite 資料庫，來源明確固定為以下五頁（繁簡名稱皆可）：
 
@@ -47,7 +82,7 @@ Windows：
 .venv\Scripts\python.exe server.py
 ```
 
-瀏覽器在本機連到 127.0.0.1 的 8000 埠即可使用。這是本機工具，尚未部署為公開網站。
+瀏覽器在本機連到 127.0.0.1 的 8000 埠即可使用。這是本機 Python 工具；上方 GitHub Pages 網站可直接使用，無需執行 Python。
 此雲端工作區的 Python 已安裝於 `/workspace/AutoReport/.venv/bin/python`；在 `/workspace/AutoReport` 執行 `.venv/bin/python server.py` 可啟動。
 每個雲端任務已有隔離環境，直接使用現有 checkout，不需建立 Git worktree。
 

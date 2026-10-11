@@ -1,0 +1,12 @@
+import {build} from 'esbuild';
+import {mkdir,copyFile,rm,writeFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {existsSync} from 'node:fs';
+await rm('dist',{recursive:true,force:true});await mkdir('dist/assets',{recursive:true});
+execFileSync(existsSync('.venv/bin/python')?'.venv/bin/python':'python',['web/export_reference.py','dist/reference.json']);
+await build({entryPoints:{app:'web/app.mjs',worker:'web/worker.mjs'},bundle:true,format:'esm',platform:'browser',outdir:'dist/assets',minify:true,target:['es2022'],legalComments:'linked'});
+await copyFile('web/index.html','dist/index.html');await writeFile('dist/.nojekyll','');
+await copyFile('data/autoreport.sqlite3','dist/autoreport.sqlite3');
+await mkdir('dist/downloads');
+for(const name of ['AutoReport_query_template.xlsx','AutoReport_sample_results.xlsx','AutoReport_summary.xlsx'])await copyFile('downloads/'+name,'dist/downloads/'+name);
+console.log('Built GitHub Pages site in dist/');
