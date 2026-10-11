@@ -6,6 +6,7 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 
 import autoreport as a
+FIXTURE_SHEETS = ['簡體對照', '工單連結', '合併欄位', '產品系列', '無對照']
 
 
 def fixture():
@@ -13,19 +14,19 @@ def fixture():
     s = book.active
     s.title = '簡體對照'
     s.append(['机种', '机型', '料号', '工单号'])
-    s.append(['繁體測試機種', 'Goodix', '98000001-107', 'C001'])
-    s.append(['另一機種', 'FPC', '98000002-107', 'C002'])
-    s.append(['繁體測試機種', 'Synaptics', 'SHARED', 'C003'])
-    s.append(['另一機種', 'FPC', 'SHARED', 'C004'])
-    s.append(['繁體測試機種', 'Goodix', '98000001-108', 'C005'])
-    s.append(['不完整', 'N/A', 'UNKNOWN-IC', 'C006'])
+    s.append(['繁體測試機種', 'Goodix', '98000001-107', 'ORDER001'])
+    s.append(['另一機種', 'FPC', '98000002-107', 'ORDER002'])
+    s.append(['繁體測試機種', 'Synaptics', 'SHARED', 'ORDER003'])
+    s.append(['另一機種', 'FPC', 'SHARED', 'ORDER004'])
+    s.append(['繁體測試機種', 'Goodix', '98000001-108', 'ORDER005'])
+    s.append(['不完整', 'N/A', 'UNKNOWN-IC', 'ORDER006'])
     s = book.create_sheet('工單連結')
     s.append(['工單號', '成品料號', '分段式料號'])
-    s.append(['S001', '98000001-107', '95000001-107'])
+    s.append(['LINK001', '98000001-107', '95000001-107'])
     s = book.create_sheet('合併欄位')
     s.append(['機種', 'IC', '料號', '工單號'])
-    s.append(['合併機種', 'Elan', 'MERGED', 'M001'])
-    s.append([None, None, None, 'M002'])
+    s.append(['合併機種', 'Elan', 'MERGED', 'MERGED001'])
+    s.append([None, None, None, 'MERGED002'])
     for col in 'ABC':
         s.merge_cells(f'{col}2:{col}3')
     # Format in XFD without data: bounds must be based on actual cells.
@@ -49,7 +50,7 @@ class DatabaseTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = a.connect(Path(self.tmp.name) / 'test.sqlite3')
         self.payload = fixture()
-        self.summary = a.import_excel(self.db, self.payload, 'test.xlsx')
+        self.summary = a.import_excel(self.db, self.payload, 'test.xlsx', FIXTURE_SHEETS)
 
     def tearDown(self):
         self.db.close()
@@ -59,7 +60,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(self.summary['sheets']), 5)
         self.assertEqual(a.lookup(self.db, [('part', 'SIXTH-PART')])['狀態'], '查無資料')
         before = self.db.execute('SELECT COUNT(*) FROM records').fetchone()[0]
-        self.assertTrue(a.import_excel(self.db, self.payload, 'renamed.xlsx')['duplicate'])
+        self.assertTrue(a.import_excel(self.db, self.payload, 'renamed.xlsx', FIXTURE_SHEETS)['duplicate'])
         self.assertEqual(before, self.db.execute('SELECT COUNT(*) FROM records').fetchone()[0])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM raw_rows WHERE sheet_id=5').fetchone()[0], 2)
 
@@ -73,7 +74,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(r['候選'][0]['IC'], 'Goodix')
 
     def test_order_link_and_revision_preserved(self):
-        r = a.lookup(self.db, [('order', 's001')])
+        r = a.lookup(self.db, [('order', 'link001')])
         self.assertEqual(r['狀態'], '唯一匹配')
         self.assertEqual(r['候選'][0]['機種'], '繁體測試機種')
         self.assertEqual(r['查找依據'][0]['分頁'], '工單連結')
@@ -83,16 +84,16 @@ class DatabaseTests(unittest.TestCase):
         r = a.lookup(self.db, [('part', 'SHARED')])
         self.assertEqual(r['狀態'], '多組候選')
         self.assertEqual(len(r['候選']), 2)
-        r = a.lookup(self.db, [('order', 'C001'), ('ic', 'FPC')])
+        r = a.lookup(self.db, [('order', 'ORDER001'), ('ic', 'FPC')])
         self.assertEqual(r['狀態'], '條件不一致')
         self.assertFalse(r['候選'])
 
     def test_merged_identifiers_and_raw_preserved(self):
-        r = a.lookup(self.db, [('order', 'M002')])
+        r = a.lookup(self.db, [('order', 'MERGED002')])
         self.assertEqual(r['候選'][0]['機種'], '合併機種')
         self.assertEqual(r['候選'][0]['IC'], 'Elan')
         self.assertEqual(self.db.execute('SELECT cells_json FROM raw_rows WHERE sheet_id=3 AND row_number=3').fetchone()[0],
-                         '["", "", "", "M002"]')
+                         '["", "", "", "MERGED002"]')
 
     def test_model_platform_separate_and_missing_ic(self):
         r = a.lookup(self.db, [('model', 'A16')])
@@ -101,7 +102,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(a.lookup(self.db, [('part', 'UNKNOWN-IC')])['狀態'], '來源未提供完整對應')
 
     def test_csv_upload_and_excel_export_are_functional(self):
-        data = '工单号码,产品料号,机种,机型\nC001,,,\n,SHARED,,\n,NO-SUCH-PART,,\n'.encode('utf-8-sig')
+        data = '工单号码,产品料号,机种,机型\nORDER001,,,\n,SHARED,,\n,NO-SUCH-PART,,\n'.encode('utf-8-sig')
         result = a.match_upload(self.db, data, 'upload.csv')
         self.assertEqual([r['狀態'] for r in result['結果']], ['唯一匹配', '多組候選', '查無資料'])
         self.assertEqual(result['結果'][0]['機種'], '繁體測試機種')
@@ -113,7 +114,7 @@ class DatabaseTests(unittest.TestCase):
     def test_xlsx_upload_with_simplified_headers(self):
         book = Workbook()
         book.active.append(['工单号', '料号', '机种', '机型'])
-        book.active.append(['C001', '', '', ''])
+        book.active.append(['ORDER001', '', '', ''])
         buf = io.BytesIO()
         book.save(buf)
         result = a.match_upload(self.db, buf.getvalue(), 'request.xlsx')
@@ -129,6 +130,125 @@ class DatabaseTests(unittest.TestCase):
         self.assertFalse(a.search(self.db, "%'; DROP TABLE records;--"))
         self.assertFalse(a.search(self.db, '%'))
         self.assertTrue(a.stats(self.db)['索引資料列'])
+
+    def test_default_selection_is_named_tabs_not_first_five_positions(self):
+        book = Workbook()
+        book.remove(book.active)
+        for name in ['模版', '越南需求', '工单WIP汇总', '0711業務出貨需求']:
+            s = book.create_sheet(name)
+            s.append(['工單號', 'IC', '機種', '料號'])
+            s.append(['C999-999999999', 'WRONG', '不應匯入', 'WRONG-PART'])
+        for i, name in enumerate(a.REFERENCE_SHEETS):
+            s = book.create_sheet(a.CC.convert(name))
+            s.append(['工单号', '机型', '机种', '料号'])
+            s.append([f'C515-26010000{i}', 'Goodix', '正確機種', f'9800000{i}-101'])
+        payload = io.BytesIO()
+        book.save(payload)
+        other = a.connect(Path(self.tmp.name) / 'selected.sqlite3')
+        result = a.import_excel(other, payload.getvalue(), 'named.xlsx')
+        self.assertEqual([a.norm(s['name']) for s in result['sheets']], [a.norm(s) for s in a.REFERENCE_SHEETS])
+        self.assertEqual(a.lookup(other, [('part', 'WRONG-PART')])['狀態'], '查無資料')
+        self.assertEqual(a.stats(other)['索引資料列'], 5)
+        other.close()
+
+    def test_missing_selected_tab_fails_before_writing(self):
+        before = self.db.execute('SELECT COUNT(*) FROM sources').fetchone()[0]
+        with self.assertRaisesRegex(ValueError, '缺少指定來源分頁'):
+            a.import_excel(self.db, self.payload, 'missing.xlsx')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM sources').fetchone()[0], before)
+
+    def test_first_work_order_only_sap_prefix_and_placeholders(self):
+        self.assertEqual(a.order_numbers('C520-260600014\nSAP:C520-626070046'), ['C520-260600014'])
+        self.assertEqual(a.order_numbers('SAP:C520-626070046\nC520-260600014'), ['C520-626070046'])
+        self.assertEqual(a.order_numbers('-\nC520-626070046'), [])
+        self.assertEqual(a.order_numbers('C530-260600035*50'), ['C530-260600035'])
+        self.assertEqual(a.order_numbers('626090006'), ['626090006'])
+        for value in ['-', '4月转5月', '板材异常', '52300303-101', 'C531']:
+            self.assertEqual(a.order_numbers(value), [])
+        book = Workbook()
+        book.active.title = '訂單'
+        book.active.append(['工單號', '機型', '機種', '料號'])
+        book.active.append(['C520-260600014\nSAP:C520-626070046', 'Goodix', '多工單', '98000200-101'])
+        payload = io.BytesIO()
+        book.save(payload)
+        a.import_excel(self.db, payload.getvalue(), 'multi.xlsx', ['訂單'])
+        self.assertEqual(a.lookup(self.db, [('order', 'C520-260600014')])['候選'][0]['機種'], '多工單')
+        self.assertEqual(a.lookup(self.db, [('order', 'C520-626070046')])['狀態'], '查無資料')
+
+    def test_first_entry_for_model_ic_and_part_keeps_slash_in_name(self):
+        book = Workbook()
+        book.active.title = '第一筆'
+        book.active.append(['工單號', '機型', '機種', '料號', 'DPN'])
+        book.active.append(['C515-260100001\nC515-260100002', 'Goodix\nSynaptics',
+                            'Slate/Congo 14\n其他機種', '98000398-103\n98000412-103', 'X677X\nPCC61'])
+        buf = io.BytesIO()
+        book.save(buf)
+        a.import_excel(self.db, buf.getvalue(), 'first.xlsx', ['第一筆'])
+        result = a.lookup(self.db, [('order', 'C515-260100001')])
+        self.assertEqual(result['候選'][0]['IC'], 'Goodix')
+        self.assertEqual(result['候選'][0]['機種'], 'Slate/Congo 14')
+        self.assertEqual(a.lookup(self.db, [('order', 'C515-260100002')])['狀態'], '查無資料')
+        self.assertEqual(a.lookup(self.db, [('part', '98000412-103')])['狀態'], '查無資料')
+        self.assertEqual(a.lookup(self.db, [('dpn', 'PCC61')])['狀態'], '查無資料')
+
+    def test_rework_label_resolves_ic_using_exact_part_and_swapped_dpn(self):
+        book = Workbook()
+        book.active.title = '標準'
+        book.active.append(['工單號', 'IC', '機種', '料號'])
+        book.active.append(['C515-260100001', 'CY26Goodix', 'CY26-14', '98000398-103'])
+        s = book.create_sheet('重工')
+        s.append(['工單號', 'IC', '機種', '料號', 'DPN', ''])
+        s.append(['C630-626080041', '不良品返修', 'CY26', '95000331-102', '98000398-103', 'C523-260800002'])
+        buf = io.BytesIO()
+        book.save(buf)
+        a.import_excel(self.db, buf.getvalue(), 'rework.xlsx', ['標準', '重工'])
+        for order in ['C630-626080041', 'C523-260800002']:
+            result = a.lookup(self.db, [('order', order)])
+            self.assertEqual(result['候選'][0]['IC'], 'Goodix')
+            self.assertEqual(result['候選'][0]['來源'][0]['原始IC／機型'], '不良品返修')
+        result = a.lookup(self.db, [('order', 'C515-260100001')])
+        self.assertEqual(result['候選'][0]['IC'], 'Goodix')
+        self.assertEqual(result['候選'][0]['產品系列'], ['CY26'])
+
+    def test_rework_without_reference_remains_incomplete(self):
+        book = Workbook()
+        book.active.title = '重工'
+        book.active.append(['工單號', 'IC', '機種', '料號'])
+        book.active.append(['C630-626080999', '重工测试程式', '無對照機種', '98000999-101'])
+        buf = io.BytesIO()
+        book.save(buf)
+        a.import_excel(self.db, buf.getvalue(), 'unresolved.xlsx', ['重工'])
+        result = a.lookup(self.db, [('order', 'C630-626080999')])
+        self.assertEqual(result['狀態'], '來源未提供完整對應')
+        self.assertEqual(result['候選'][0]['IC'], '')
+
+    def test_rework_conflicting_part_ic_is_not_inferred(self):
+        book = Workbook()
+        book.active.title = '參考'
+        book.active.append(['工單號', 'IC', '機種', '料號'])
+        book.active.append(['C515-260100001', 'CY26Goodix', 'CY26-14', '98000412-103'])
+        book.active.append(['C515-260100002', 'CY26Synaptics', 'CY26-14', '98000412-103'])
+        s = book.create_sheet('重工')
+        s.append(['工單號', 'IC', '機種', '料號'])
+        s.append(['C630-626080043', '不良品返修', 'CY26', '98000412-103'])
+        buf = io.BytesIO()
+        book.save(buf)
+        a.import_excel(self.db, buf.getvalue(), 'conflict.xlsx', ['參考', '重工'])
+        r = a.lookup(self.db, [('order', 'C630-626080043')])
+        self.assertEqual(r['狀態'], '來源未提供完整對應')
+        self.assertEqual(r['候選'][0]['IC'], '')
+
+    def test_work_order_with_missing_model_is_incomplete_not_absent(self):
+        book = Workbook()
+        book.active.title = '缺機種'
+        book.active.append(['工單號', 'IC', '機種'])
+        book.active.append(['C510-260500009', 'Elan', ''])
+        buf = io.BytesIO()
+        book.save(buf)
+        a.import_excel(self.db, buf.getvalue(), 'partial.xlsx', ['缺機種'])
+        r = a.lookup(self.db, [('order', 'C510-260500009')])
+        self.assertEqual(r['狀態'], '來源未提供完整對應')
+        self.assertEqual(r['候選'][0]['IC'], 'Elan')
 
 
 if __name__ == '__main__':

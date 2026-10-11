@@ -1,4 +1,4 @@
-"""Import only the first five Excel sheets and resolve model/IC with provenance."""
+"""Resolve work orders to IC/model from the five explicitly selected source tabs."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = ROOT / 'data' / 'autoreport.sqlite3'
 CC = OpenCC('t2s')
 NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+REFERENCE_SHEETS = ('工單（A16）', 'CY26', '工單（CY24&25）', '重工工單1', 'NPI')
+ORDER_PATTERN = re.compile(r'(?<![A-Z0-9])(?:[A-Z]\d{3}-\d{6,12}|\d{9})(?![A-Z0-9])', re.I)
+PART_PATTERN = re.compile(r'(?<!\d)\d{8}-\d{3}(?!\d)')
 
 
 def norm(value):
@@ -46,6 +49,47 @@ def available(value):
     return norm(value) not in {'', '-', 'n/a', 'na', 'none', '无', '未知'}
 
 
+def first_text(value):
+    """Use the first nonempty entry only; keep slash/comma inside product names."""
+    return next((v.strip() for v in re.split(r'[\r\n;；、]+', text(value)) if v.strip()), '')
+
+
+def order_numbers(value, labeled=True):
+    value = unicodedata.normalize('NFKC', first_text(value)).upper()
+    found = ORDER_PATTERN.findall(value)
+    if found:
+        return found[:1]
+    # Other installations may use IDs like WO001. C531 alone is only a stage prefix.
+    if labeled and re.fullmatch(r'[A-Z]{2,}[-_]?[0-9]+', value):
+        return [value]
+    return []
+
+
+def split_values(value):
+    value = first_text(value)
+    return [value] if available(value) else []
+
+
+def primary_identifiers(record):
+    parts = json.loads(record['parts_json'])
+    anchors = [p for p in parts if p.startswith('98')] or [p for p in parts if p.startswith('95')] or parts
+    return [('part', p) for p in anchors] + [('dpn', p) for p in json.loads(record['dpns_json'])]
+
+
+def ic_details(raw_ic):
+    """Split an explicit generation prefix from a known IC brand; retain raw text."""
+    if not available(first_text(raw_ic)):
+        return '', '', []
+    original = first_text(raw_ic)
+    if re.search(r'重工|返修|不良品', norm(original)):
+        return '', '', ['原始 IC 欄為重工用途，需依料號確認']
+    match = re.fullmatch(r'(CY\d{2})\s*(Goodix|Synaptics|Elan|FPC|Focal)', original, re.I)
+    if match:
+        brands = {norm(b): b for b in ('Goodix', 'Synaptics', 'Elan', 'FPC', 'Focal')}
+        return brands[norm(match[2])], match[1].upper(), ['IC／機型原文含代別；已分離代別與 IC 品牌']
+    return original, '', []
+
+
 def role(header):
     h = norm(header)
     if h in {'ic', '机型', 'ic型号', 'ic厂商', 'ic品牌'}:
@@ -64,7 +108,7 @@ def role(header):
     return None
 
 
-def excel_sheets(payload):
+def excel_sheets(payload, sheet_names=None):
     """Preserve raw cells; expand merged identifiers in a separate working copy.
 
     Inspect XML bounds so formatting up to XFD does not allocate 16384 columns.
@@ -75,8 +119,20 @@ def excel_sheets(payload):
         book = load_workbook(io.BytesIO(payload), read_only=True, data_only=True,
                              keep_links=False)
     output = []
+    if sheet_names is None:
+        selected = list(book)
+    else:
+        names = {norm(s.title): s for s in book}
+        if len(names) != len(book.sheetnames):
+            book.close()
+            raise ValueError('分頁名稱正規化後重複，無法明確選取。')
+        missing = [name for name in sheet_names if norm(name) not in names]
+        if missing:
+            book.close()
+            raise ValueError('缺少指定來源分頁：' + '、'.join(missing) + '；未匯入任何資料。')
+        selected = [names[norm(name)] for name in sheet_names]
     with ZipFile(io.BytesIO(payload)) as archive:
-        for sheet in list(book)[:5]:
+        for sheet in selected:
             xml = ET.fromstring(archive.read(sheet._worksheet_path.lstrip('/')))
             cells = [c for c in xml.findall('.//m:c', NS)
                      if any(c.find('m:' + tag, NS) is not None for tag in ('v', 'is', 'f'))]
@@ -130,7 +186,8 @@ def connect(path=DEFAULT_DB):
         id INTEGER PRIMARY KEY, sheet_id INTEGER REFERENCES sheets(id), row_number INTEGER,
         model TEXT NOT NULL, ic TEXT NOT NULL, family TEXT NOT NULL,
         parts_json TEXT NOT NULL, dpns_json TEXT NOT NULL, orders_json TEXT NOT NULL,
-        raw_json TEXT NOT NULL, search_text TEXT NOT NULL);
+        raw_json TEXT NOT NULL, search_text TEXT NOT NULL,
+        raw_ic TEXT NOT NULL DEFAULT '', resolution_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS lookup_keys (
         kind TEXT NOT NULL, value TEXT NOT NULL, record_id INTEGER REFERENCES records(id),
         PRIMARY KEY(kind, value, record_id));
@@ -138,16 +195,35 @@ def connect(path=DEFAULT_DB):
     CREATE TABLE IF NOT EXISTS raw_rows (
         sheet_id INTEGER REFERENCES sheets(id), row_number INTEGER,
         cells_json TEXT NOT NULL, PRIMARY KEY(sheet_id, row_number));
+    CREATE TABLE IF NOT EXISTS work_orders (
+        order_number TEXT NOT NULL, normalized_order TEXT NOT NULL,
+        record_id INTEGER REFERENCES records(id), column_number INTEGER NOT NULL,
+        stage TEXT NOT NULL, PRIMARY KEY(normalized_order,record_id,column_number));
+    CREATE INDEX IF NOT EXISTS work_orders_lookup ON work_orders(normalized_order);
     ''')
+    columns = {r['name'] for r in db.execute('PRAGMA table_info(records)')}
+    if 'raw_ic' not in columns:
+        db.execute("ALTER TABLE records ADD COLUMN raw_ic TEXT NOT NULL DEFAULT ''")
+        db.execute('UPDATE records SET raw_ic=ic')
+    if 'resolution_json' not in columns:
+        db.execute("ALTER TABLE records ADD COLUMN resolution_json TEXT NOT NULL DEFAULT '[]'")
+    db.execute('''CREATE VIEW IF NOT EXISTS work_order_mappings AS
+        SELECT w.order_number AS work_order, r.ic, r.model, r.raw_ic, r.family,
+               r.parts_json, s.name AS source_sheet, r.row_number AS source_row,
+               w.stage, r.resolution_json
+        FROM work_orders w JOIN records r ON r.id=w.record_id
+        JOIN sheets s ON s.id=r.sheet_id''')
     return db
 
 
-def import_excel(db, payload, filename):
-    digest = hashlib.sha256(payload).hexdigest()
+def import_excel(db, payload, filename, sheet_names=REFERENCE_SHEETS):
+    # Import identity includes the selected names and parsing rules.
+    scope = json.dumps([norm(v) for v in sheet_names], ensure_ascii=False)
+    digest = hashlib.sha256(payload + ('scope-v3-first-entry:' + scope).encode()).hexdigest()
     previous = db.execute('SELECT id FROM sources WHERE sha256=?', (digest,)).fetchone()
     if previous:
         return {'duplicate': True, 'source_id': previous['id']}
-    sheets = excel_sheets(payload)
+    sheets = excel_sheets(payload, sheet_names)
     summary = []
     with db:
         source_id = db.execute('INSERT INTO sources(filename,sha256,imported_at) VALUES(?,?,?)',
@@ -169,8 +245,36 @@ def import_excel(db, payload, filename):
                 families = [c for c, h in enumerate(headers) if norm(h) == 'model'] if platforms else []
                 for i in range(offset + 1, len(raw)):
                     row = expanded[i]
-                    values = {r: [row[c] for c, rr in enumerate(roles) if rr == r and row[c]]
+                    values = {r: [first_text(row[c]) for c, rr in enumerate(roles) if rr == r and first_text(row[c])]
                               for r in ('model', 'ic', 'part', 'dpn', 'order')}
+                    entries = []
+                    for c, value in enumerate(row):
+                        numbers = order_numbers(value, labeled=roles[c] == 'order') if roles[c] in ('order', None) else []
+                        for number in numbers:
+                            label = headers[c]
+                            if not label:
+                                label = f'未標示欄位 {c + 1}'
+                            entries.append((number, c + 1, label))
+                    values['order'] = list(dict.fromkeys(e[0] for e in entries))
+                    values['part'] = list(dict.fromkeys(v for value in values['part'] for v in split_values(value)
+                                                       if not re.search(r'[\u4e00-\u9fff]', v)))
+                    dpns = []
+                    for value in values['dpn']:
+                        for v in split_values(value):
+                            if PART_PATTERN.fullmatch(v):
+                                values['part'].append(v)
+                            else:
+                                dpns.append(v)
+                    values['dpn'] = list(dict.fromkeys(dpns))
+                    # Unlabeled 91/92/93/95/98 part columns in rework rows are useful references.
+                    for c, value in enumerate(row):
+                        value = first_text(value)
+                        if roles[c] is None and PART_PATTERN.fullmatch(value) and value[:2] in {'91', '92', '93', '95', '98'}:
+                            values['part'].append(value)
+                    values['part'] = list(dict.fromkeys(values['part']))
+                    # Footnotes such as NPI's warehouse instruction are raw data, not mappings.
+                    if not any(values[r] for r in ('part', 'dpn', 'order')):
+                        continue
                     if not any(values.values()):
                         continue
                     if any(norm(v) in {'ttl', 'total', '合计', '总计', 'dailycapacity', 'wip天数'}
@@ -182,31 +286,86 @@ def import_excel(db, payload, filename):
                         if sum(role(row[c]) == roles[c] for c in range(len(roles))
                                if roles[c] and row[c]) >= 2:
                             continue
-                    model_values = [row[c] for c in platforms if row[c]] if platforms else values['model']
+                    model_values = [first_text(row[c]) for c in platforms if first_text(row[c])] if platforms else values['model']
                     model = model_values[0] if model_values else ''
-                    ic = values['ic'][0] if values['ic'] else ''
-                    family = next((row[c] for c in families if row[c]), '')
+                    raw_ic = next((row[c] for c, rr in enumerate(roles) if rr == 'ic' and row[c]), '')
+                    ic, generation, notes = ic_details(raw_ic)
+                    values['ic'] = [ic] if ic else []
+                    family = next((first_text(row[c]) for c in families if first_text(row[c])), '')
+                    family = family or generation
                     # Keep duplicate column names and physical column positions in provenance.
                     original = [{'column': c + 1, 'header': h, 'value': raw[i][c]}
                                 for c, h in enumerate(headers) if h or raw[i][c]]
                     record_id = db.execute('INSERT INTO records(sheet_id,row_number,model,ic,family,'
-                                           'parts_json,dpns_json,orders_json,raw_json,search_text) '
-                                           'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                           'parts_json,dpns_json,orders_json,raw_json,search_text,raw_ic,resolution_json) '
+                                           'VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                                            (sheet_id, i + 1, model, ic, family,
                                             json.dumps(values['part'], ensure_ascii=False),
                                             json.dumps(values['dpn'], ensure_ascii=False),
                                             json.dumps(values['order'], ensure_ascii=False),
-                                            json.dumps(original, ensure_ascii=False), norm(' '.join(row)))).lastrowid
+                                            json.dumps(original, ensure_ascii=False), norm(' '.join(row)), raw_ic,
+                                            json.dumps(notes, ensure_ascii=False))).lastrowid
                     keys = set()
                     for kind in ('part', 'dpn', 'order', 'ic'):
-                        keys.update((kind, norm(v), record_id) for v in values[kind] if norm(v))
+                        keys.update((kind, norm(v), record_id) for v in values[kind] if available(v))
+                    if available(raw_ic) and ic:
+                        keys.add(('ic', norm(first_text(raw_ic)), record_id))
                     keys.update(('model', norm(v), record_id) for v in (model, family) if norm(v))
                     db.executemany('INSERT OR IGNORE INTO lookup_keys VALUES(?,?,?)', sorted(keys))
+                    db.executemany('INSERT OR IGNORE INTO work_orders VALUES(?,?,?,?,?)',
+                                   [(number, norm(number), record_id, col, stage) for number, col, stage in entries])
                     count += 1
             db.execute('UPDATE sheets SET indexed_rows=? WHERE id=?', (count, sheet_id))
             summary.append({'position': position, 'name': name, 'header_row': header[1] + 1 if header else None,
                             'raw_rows': sum(any(r) for r in raw), 'indexed_rows': count})
+        reconcile_missing_ic(db, source_id)
     return {'duplicate': False, 'source_id': source_id, 'sheets': summary}
+
+
+def reconcile_missing_ic(db, source_id):
+    """Rework labels cannot be ICs. Resolve only unanimous exact primary identifiers."""
+    unresolved = db.execute("SELECT r.* FROM records r JOIN sheets s ON s.id=r.sheet_id "
+                            "WHERE s.source_id=? AND r.ic=''", (source_id,)).fetchall()
+    for record in unresolved:
+        # Finished-product identifiers take precedence over shared component identifiers.
+        identifiers = primary_identifiers(record)
+        references = {}
+        for kind, value in identifiers:
+            for reference in db.execute('''SELECT other.id,other.ic,other.model,other.raw_ic FROM lookup_keys k
+                JOIN records other ON other.id=k.record_id JOIN sheets s ON s.id=other.sheet_id
+                WHERE k.kind=? AND k.value=? AND other.ic<>'' AND s.source_id=?''',
+                                       (kind, norm(value), source_id)):
+                if not ic_details(reference['raw_ic'])[0]:
+                    continue
+                if a_model := reference['model']:
+                    # A specific source model constrains matches; CY26 is a generation-level label.
+                    if record['model'] and norm(record['model']) != 'cy26' and norm(a_model) != norm(record['model']):
+                        continue
+                references[reference['id']] = reference
+        brands = {norm(r['ic']): r['ic'] for r in references.values() if available(r['ic'])}
+        notes = json.loads(record['resolution_json'])
+        if len(brands) == 1:
+            ic = next(iter(brands.values()))
+            notes.append('以相同主料號／DPN 跨頁確認 IC：' + ic)
+            notes.append({'IC依據資料列ID': sorted(references)})
+            db.execute('UPDATE records SET ic=?,resolution_json=?,search_text=search_text||? WHERE id=?',
+                       (ic, json.dumps(notes, ensure_ascii=False), norm(ic), record['id']))
+            db.execute('INSERT OR IGNORE INTO lookup_keys VALUES(?,?,?)', ('ic', norm(ic), record['id']))
+            models = {norm(r['model']): r['model'] for r in references.values() if available(r['model'])}
+            if not record['model'] and len(models) == 1:
+                model = next(iter(models.values()))
+                notes.append('以相同主料號／DPN 跨頁確認機種：' + model)
+                db.execute('UPDATE records SET model=?,resolution_json=?,search_text=search_text||? WHERE id=?',
+                           (model, json.dumps(notes, ensure_ascii=False), norm(model), record['id']))
+                db.execute('INSERT OR IGNORE INTO lookup_keys VALUES(?,?,?)', ('model', norm(model), record['id']))
+            elif not record['model']:
+                notes.append('機種待確認：相同主料號存在多個來源名稱')
+                db.execute('UPDATE records SET resolution_json=? WHERE id=?',
+                           (json.dumps(notes, ensure_ascii=False), record['id']))
+        else:
+            notes.append('IC 待確認：' + ('料號對應多個 IC' if brands else '無完整料號對照'))
+            db.execute('UPDATE records SET resolution_json=? WHERE id=?',
+                       (json.dumps(notes, ensure_ascii=False), record['id']))
 
 
 RECORD_SQL = '''SELECT r.*, s.name AS sheet, src.filename AS source_file
@@ -220,6 +379,7 @@ def present(record):
         r[field] = json.loads(r.pop(field + '_json'))
     r.pop('search_text', None)
     r.pop('raw_json', None)
+    r['resolution'] = json.loads(r.pop('resolution_json'))
     return r
 
 
@@ -235,32 +395,38 @@ def lookup(db, criteria):
     Orders without model/IC may resolve through exact part/DPN relations.
     Revision suffixes are preserved; fuzzy text search never auto-fills a result.
     """
-    sets, all_candidates, evidence, resolved_criteria = [], {}, {}, []
+    expanded_criteria = []
     for kind, value in criteria:
+        value = first_text(value)
+        numbers = order_numbers(value) if kind in ('order', 'any') else []
+        expanded_criteria.extend([(kind, number) for number in numbers] if numbers else [(kind, value)])
+    sets, all_candidates, evidence, resolved_criteria = [], {}, {}, []
+    for kind, value in expanded_criteria:
         if not norm(value):
             continue
         ids = direct_ids(db, kind, value)
         linked = set(ids)
         for record_id in ids:
-            rec = db.execute('SELECT model,ic FROM records WHERE id=?', (record_id,)).fetchone()
-            if rec['model'] and rec['ic']:
+            rec = db.execute('SELECT * FROM records WHERE id=?', (record_id,)).fetchone()
+            if rec['model']:
                 continue
             # Only identifiers in source rows lacking mappings can bridge to another row.
-            for key in db.execute("SELECT kind,value FROM lookup_keys WHERE record_id=? AND kind IN ('part','dpn')",
-                                  (record_id,)).fetchall():
-                linked.update(direct_ids(db, key['kind'], key['value']))
+            for key_kind, key_value in primary_identifiers(rec):
+                for other_id in direct_ids(db, key_kind, key_value):
+                    other = db.execute('SELECT ic FROM records WHERE id=?', (other_id,)).fetchone()
+                    if not rec['ic'] or norm(other['ic']) == norm(rec['ic']):
+                        linked.add(other_id)
         pairs = set()
         for record_id in sorted(linked):
             rec = db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
-            if not rec['model']:
-                continue
             pair = (norm(rec['model']), norm(rec['ic']))
             pairs.add(pair)
             all_candidates.setdefault(pair, {'機種': rec['model'], 'IC': rec['ic'], '產品系列': set(), '來源': {}})
             if rec['family']:
                 all_candidates[pair]['產品系列'].add(rec['family'])
             all_candidates[pair]['來源'][record_id] = {
-                '檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number']}
+                '檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number'],
+                '原始IC／機型': rec['raw_ic'], '整理依據': json.loads(rec['resolution_json'])}
         # Records with IC should supersede incomplete mappings for the same identifier.
         if any(ic for _, ic in pairs):
             pairs = {p for p in pairs if p[1]}
@@ -300,6 +466,7 @@ def stats(db):
     return {'分頁': [dict(r) for r in db.execute('SELECT s.*,src.filename FROM sheets s '
                                                 'JOIN sources src ON src.id=s.source_id ORDER BY s.id')],
             '索引資料列': db.execute('SELECT COUNT(*) FROM records').fetchone()[0],
+            '不重複工單': db.execute('SELECT COUNT(DISTINCT normalized_order) FROM work_orders').fetchone()[0],
             '機種IC組合': db.execute("SELECT COUNT(*) FROM (SELECT DISTINCT model,ic FROM records WHERE model<>'' AND ic<>'')").fetchone()[0],
             'IC清單': [r[0] for r in db.execute("SELECT DISTINCT ic FROM records WHERE ic<>'' ORDER BY ic")]}
 
@@ -374,6 +541,8 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     imp = sub.add_parser('import')
     imp.add_argument('file', type=Path)
+    imp.add_argument('--sheets', nargs='+', default=list(REFERENCE_SHEETS),
+                     help='明確指定來源分頁；預設採用圖一的五頁，繁簡名稱均可')
     qry = sub.add_parser('query')
     qry.add_argument('value')
     qry.add_argument('--kind', choices=['any', 'order', 'part', 'dpn', 'model', 'ic'], default='any')
@@ -386,7 +555,7 @@ def main():
     args = parser.parse_args()
     with connect(args.db) as db:
         if args.command == 'import':
-            result = import_excel(db, args.file.read_bytes(), args.file.name)
+            result = import_excel(db, args.file.read_bytes(), args.file.name, args.sheets)
         elif args.command == 'query':
             result = lookup(db, [(args.kind, args.value)])
         elif args.command == 'search':
