@@ -6,6 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 test('Pages project path loads; browser uploads Excel/CSV and downloads a real workbook',async()=>{
  const root=path.resolve('dist');const requests=[];
  const server=createServer(async(req,res)=>{
@@ -52,6 +53,28 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(await page.locator('#message').evaluate(el=>el.closest('.panel')?.querySelector('#export')!==null),true,'download feedback is next to the upload controls');
   await page.locator('#file').setInputFiles({name:'new.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nmissing\n')});
   assert.equal(await page.locator('#export').isDisabled(),true,'a changed file invalidates the previous download');
+  const first=Buffer.from(await detailBook.xlsx.writeBuffer());detail.getCell('A2').value='第二份原始內容';
+  const second=Buffer.from(await detailBook.xlsx.writeBuffer());
+  await page.locator('#file').setInputFiles([
+   {name:'same.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:first},
+   {name:'broken.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('invalid workbook')},
+   {name:'same.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:second},
+  ]);
+  await page.locator('#match').click();await page.waitForFunction(()=>document.querySelector('#message').textContent.startsWith('批次完成'));
+  assert.match(await page.locator('#message').innerText(),/可下載 2 份結果，失敗 1 個檔案/);
+  assert.equal(await page.locator('[data-download]').count(),2);
+  const [batch]=await Promise.all([page.waitForEvent('download'),page.locator('#export').click()]);
+  assert.equal(batch.suggestedFilename(),'AutoReport_批次結果.zip');
+  const zip=await JSZip.loadAsync(await readFile(await batch.path()));
+  assert.deepEqual(Object.keys(zip.files),['same_IC機種.xlsx','same_IC機種_2.xlsx']);
+  for(const [name,expected] of [['same_IC機種.xlsx','背面大板'],['same_IC機種_2.xlsx','第二份原始內容']]){
+   const result=new ExcelJS.Workbook();await result.xlsx.load(await zip.file(name).async('nodebuffer'));
+   assert.equal(result.getWorksheet('Detail').getCell('A2').value,expected);
+   assert.equal(result.getWorksheet('Detail').getCell('J2').value,'Goodix');
+   assert.equal(result.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
+  }
+  const [individual]=await Promise.all([page.waitForEvent('download'),page.locator('[data-download="1"]').click()]);
+  assert.equal(individual.suggestedFilename(),'same_IC機種_2.xlsx');
   assert.deepEqual(errors,[]);assert.ok(requests.every(([method,url])=>method==='GET'&&!url.includes('/api/')));
   console.log('Browser verified all requests are GET; upload files never leave browser.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

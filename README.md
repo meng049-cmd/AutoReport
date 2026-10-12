@@ -177,3 +177,5 @@ node --test web/update-browser.spec.mjs
 ```
 
 上傳區的「已上傳檔案」清單會向 GitHub 查詢 database-inputs 內的 Excel，並列出既有資料庫來源檔名。支援檔名搜尋與同名提醒；GitHub 清單讀取失敗時會顯示提示和資料夾連結。一般 Detail 查詢檔只在瀏覽器處理，不會存入 GitHub 清單。即使上傳的 Excel 沒有新對照，工作流程也會發布更新的檔案清單，資料庫與資料更新時間仍保持不變。
+
+批次比對可一次選取多個 Excel／CSV，逐檔處理，每份結果可獨立下載；多份成功結果可下載 ZIP。單一檔案失敗不會中斷其他檔案。同名結果會自動加上編號，避免 ZIP 內互相覆蓋。每個 Excel 的 Detail 仍只增加 J/K，保留 A–I 與其他分頁。
