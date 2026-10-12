@@ -1,0 +1,54 @@
+(function(root){
+'use strict';
+function analyzeQuality(merger){
+ const products=new Map(),units=new Map(),processes=new Map(),productProcesses=new Map();
+ const processName=value=>root.canonicalProcess?root.canonicalProcess(value):String(value).trim().replace(/\s+/g,'')==='DAF外觀檢查'?'DAF外觀':String(value).trim().replace(/\s+/g,'');
+ const addProcess=(map,key,unit,fail,meta)=>{const item=map.get(key)||{...meta,units:new Map()};item.units.set(unit,Boolean(item.units.get(unit)||fail));map.set(key,item);};
+ for(const value of merger.rows.values()){
+  const row=value.row,ic=String(row[9]??'').trim(),model=String(row[10]??'').trim(),product=JSON.stringify([ic,model]);
+  const serial=String(row[4]).trim(),key=JSON.stringify([product,serial]),process=processName(row[0]);
+  const fail=String(row[merger.status]).trim().toUpperCase()==='FAIL';
+  if(!products.has(product))products.set(product,{id:product,ic:ic||'【待補 IC】',model:model||'【待補機種】',pending:!ic||!model,units:new Set()});
+  products.get(product).units.add(key);
+  const unit=units.get(key)||{product,serial,fail:false,primary:null,failObservations:0};
+  if(fail){
+   unit.fail=true;unit.failObservations++;
+   if(!unit.primary||value.timestamp<unit.primary.timestamp)unit.primary={timestamp:value.timestamp,date:value.day,process,defect:String(row[7]??'').trim()||'【未填不良項目】'};
+  }
+  units.set(key,unit);
+  addProcess(processes,process,key,fail,{process});
+  addProcess(productProcesses,JSON.stringify([product,process]),key,fail,{product,process});
+ }
+ const globalTotal=units.size,globalFail=[...units.values()].filter(u=>u.fail).length;
+ const globalDefects=new Map(),productDefects=new Map(),attribution=[];
+ for(const unit of units.values())if(unit.fail){
+  const {process,defect,date}=unit.primary,p=products.get(unit.product);
+  const key=JSON.stringify([process,defect]),pk=JSON.stringify([unit.product,process,defect]);
+  const increment=(map,key,meta)=>{const value=map.get(key)||{...meta,count:0};value.count++;map.set(key,value);};
+  increment(globalDefects,key,{process,defect});increment(productDefects,pk,{product:unit.product,process,defect});
+  attribution.push({ic:p.ic,model:p.model,serial:unit.serial,date,process,defect,failObservations:unit.failObservations});
+ }
+ const ranking=(items,total)=>items.sort((a,b)=>b.count-a.count||a.process.localeCompare(b.process)||a.defect.localeCompare(b.defect)).map((r,index)=>({...r,rank:index+1,total,rate:total?r.count/total:0}));
+ const productRows=[...products.values()].map(p=>{
+  const total=p.units.size,fail=[...p.units].filter(key=>units.get(key).fail).length;
+  return {id:p.id,ic:p.ic,model:p.model,pending:p.pending,total,good:total-fail,fail,yield:total?(total-fail)/total:0,badRate:total?fail/total:0,contribution:globalTotal?fail/globalTotal:0,defects:ranking([...productDefects.values()].filter(d=>d.product===p.id),total)};
+ }).sort((a,b)=>b.fail-a.fail||a.model.localeCompare(b.model)||a.ic.localeCompare(b.ic));
+ const processRows=map=>[...map.values()].map(p=>{const total=p.units.size,fail=[...p.units.values()].filter(Boolean).length;const {units:ignored,...meta}=p;return {...meta,total,good:total-fail,fail,yield:total?(total-fail)/total:0};}).sort((a,b)=>a.yield-b.yield||a.process.localeCompare(b.process));
+ return {total:globalTotal,good:globalTotal-globalFail,fail:globalFail,badRate:globalTotal?globalFail/globalTotal:0,yield:globalTotal?(globalTotal-globalFail)/globalTotal:0,products:productRows,defects:ranking([...globalDefects.values()],globalTotal),processes:processRows(processes),productProcesses:processRows(productProcesses),attribution};
+}
+function appendQualitySheets(XLSX,book,analysis){
+ const append=(name,rows,percentColumns)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of percentColumns){const cell=sheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.00%';}sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,name);};
+ append('品質總覽',[['統計範圍','總片數','GOOD片數','FAIL片數','總良率','不良率'],['全部產品',analysis.total,analysis.good,analysis.fail,analysis.yield,analysis.badRate]], [4,5]);
+ append('產品總良率',[['IC','機種','產品總片數','GOOD片數','FAIL片數','產品總良率','產品自身不良率','占全產品不良貢獻比例'],...analysis.products.map(p=>[p.ic,p.model,p.total,p.good,p.fail,p.yield,p.badRate,p.contribution])],[5,6,7]);
+ append('全產品不良排名',[['排名','歸屬製程','不良項目','不良片數','全產品總片數','占全產品不良比例'],...analysis.defects.map(d=>[d.rank,d.process,d.defect,d.count,d.total,d.rate])],[5]);
+ append('各產品不良排名',[['IC','機種','排名','歸屬製程','不良項目','不良片數','產品總片數','占該產品不良比例','占全產品不良貢獻比例'],...analysis.products.flatMap(p=>p.defects.map(d=>[p.ic,p.model,d.rank,d.process,d.defect,d.count,d.total,d.rate,d.count/analysis.total]))],[7,8]);
+ append('製程總良率',[['製程','經過製程總片數','GOOD片數','FAIL片數','總良率'],...analysis.processes.map(p=>[p.process,p.total,p.good,p.fail,p.yield])],[4]);
+ const products=new Map(analysis.products.map(p=>[p.id,p]));
+ append('產品製程總良率',[['IC','機種','製程','經過製程總片數','GOOD片數','FAIL片數','總良率'],...analysis.productProcesses.map(p=>{const product=products.get(p.product);return [product.ic,product.model,p.process,p.total,p.good,p.fail,p.yield];})],[6]);
+ append('不良歸屬明細',[['IC','機種','小板序號','首次FAIL日期','首次FAIL製程','首次FAIL不良項目','此片FAIL紀錄數'],...analysis.attribution.map(a=>[a.ic,a.model,a.serial,a.date,a.process,a.defect,a.failObservations])],[]);
+ append('統計說明',[
+ ['項目','口徑'],['產品身份','IC＋機種；同一產品＋小板序號只算一片，跨日期仍不重複。'],['不良片','任一製程曾有 FAIL 即為不良片，FAIL 優先；不是最終出貨判定。'],['不良歸屬','一片只歸屬一次，採去重後主檔中時間最早的 FAIL 製程＋H 欄完整不良項目；時間相同採主檔先出現的一筆。'],['不良項目','H 欄完整內容視為一個項目，不拆分逗號、頓號等描述；其他 FAIL 仍保留於 Detail。'],['產品內加總','各項不良片數／該產品總片數，加總＝該產品自身不良率。'],['全產品加總','各產品不良片數／全產品總片數，加總＝整體不良率。'],['產品自身不良率','各產品使用不同分母，不能直接相加；改用全產品不良貢獻比例相加。'],['製程總良率','該製程 GOOD 不重複片數／經過該製程的總片數；同片同製程跨日期仍 FAIL 優先。'],['缺漏產品','明確標示待補，仍計入整體並保留明細。'],['每日前後段','原每日前後段仍採 AGGREGATE 製程良率平均，與總片數口徑的產品總良率分開顯示。']
+ ],[]);
+}
+root.analyzeQuality=analyzeQuality;root.appendQualitySheets=appendQualitySheets;
+})(typeof self!=='undefined'?self:globalThis);
