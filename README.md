@@ -195,3 +195,20 @@ node --test web/update-browser.spec.mjs
 合併用的 SheetJS 已放入 `vendor/` 並核對 npm 套件 SHA-512 完整性；執行時不依賴 CDN。
 建置前執行 `npm ci`、安裝 `requirements.txt`，再執行 `npm run build`、`npm test`、`npm run test:browser`。
 發布沿用 `web/publish_pages.py`，以正常 fast-forward push 更新 `gh-pages`，不更改現有 Pages 保護規則。
+
+## 每日良率成品
+
+在網站「每日良率報表」上傳已整併的主檔，點「計算每日良率」，完成後下載 Excel。
+以 J 欄 IC 與 K 欄機種分組、F 欄產出時間分日、A 欄製程及「狀態」欄計數，良率 = GOOD / (GOOD + FAIL)。
+J/K 缺漏的組合明確標示待補，原始列另列於「待補產品資料」，不猜測產品、不靜默丟棄資料。主檔仍按日期＋製程＋小板序號去重，FAIL 優先。
+
+成品包括：
+- 每日製程良率：每個產品一區，製程為列、日期為欄。DAF外觀檢查對應 DAF外觀。
+- 每日階段良率：SMT（正面AOI）、前段、後段。
+- 計算明細：每天各產品／製程的 GOOD、FAIL、總數與 Excel 良率公式。
+- Detail：保留去重後主檔供追溯。
+
+前段 = DAF外觀、DAF熱壓投入、功能一測試的當日良率平均；後段 = 功能二測試、外觀檢查點亮測試、輝度機測試的當日良率平均。
+Excel 使用 `IFERROR(AGGREGATE(1,6,範圍),"")`，並包含已計算的快取值；這是各製程良率的算術平均，不依產量加權。
+沒有資料留白，全 FAIL 顯示 0%，日期範圍內缺少資料的日子仍列出。
+輸出名稱如 `2026_w41_1005-1008_每日良率.xlsx`。資料只在瀏覽器處理。

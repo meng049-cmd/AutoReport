@@ -54,6 +54,16 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.deepEqual(mergedMatchedBook.worksheets.map(s=>s.name),['Detail']);
   assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('J2').value,'Goodix');
   assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
+  await page.locator('#yieldFile').setInputFiles({name:'master.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile(await mergedMatch.path())});
+  await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
+  const [yieldDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
+  assert.equal(yieldDownload.suggestedFilename(),'2026_w41_1011-1011_每日良率.xlsx');
+  const yieldBook=new ExcelJS.Workbook();await yieldBook.xlsx.readFile(await yieldDownload.path());
+  assert.deepEqual(yieldBook.worksheets.map(s=>s.name),['每日製程良率','每日階段良率','計算明細','Detail']);
+  assert.equal(yieldBook.getWorksheet('計算明細').getCell('E2').value,1);
+  assert.equal(yieldBook.getWorksheet('計算明細').getCell('H2').value.result,1);
+  assert.match(yieldBook.getWorksheet('每日階段良率').getCell('B4').value.formula,/AGGREGATE/);
+
   const failBook=new ExcelJS.Workbook();await failBook.xlsx.load(await detailBook.xlsx.writeBuffer());
   failBook.getWorksheet('Detail').getCell('H2').value='不良';failBook.getWorksheet('Detail').getCell('I2').value='FAIL';
   await page.locator('#mergeFiles').setInputFiles([

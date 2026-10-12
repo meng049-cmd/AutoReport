@@ -1,3 +1,4 @@
+import './yield-ui.mjs';
 import JSZip from 'jszip';
 import {mergeFiles,clearMergedDownload} from './merge-ui.mjs';
 const $=id=>document.getElementById(id);
