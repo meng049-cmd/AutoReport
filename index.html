@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoReport｜批次報表合併</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#16283d;font-family:system-ui,sans-serif}main{max-width:800px;margin:60px auto;padding:24px}.brand{color:#176859;font-weight:700;letter-spacing:2px}h1{font-size:32px;margin-bottom:12px}p{line-height:1.8;color:#556578}.card{background:white;border:1px solid #dce5ee;border-radius:20px;padding:30px;margin-top:28px;box-shadow:0 8px 30px #16283d08}.upload{display:block;padding:28px;background:#f7fbfa;border:2px dashed #a7c9c0;border-radius:12px}input{display:block;margin-top:18px;max-width:100%}button,.download{display:inline-block;background:#146c59;color:white;border:0;padding:14px 24px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none}button:disabled{opacity:.55;cursor:wait}ul{padding-left:22px;line-height:1.8;overflow-wrap:anywhere}.error{color:#ae2929}.stats{display:flex;flex-wrap:wrap;gap:22px;margin:24px 0}.stats strong{display:block;font-size:25px}small{color:#556578}#result[hidden]{display:none}@media(max-width:600px){main{margin:20px auto;padding:16px}.card{padding:20px}h1{font-size:26px}}
+  </style>
+</head>
+<body><main>
+  <div class="brand">AUTOREPORT</div><h1>批次合併 Detail 報表</h1>
+  <p>一次上傳多份 Excel，依日期整合資料，移除重複紀錄，完成後直接下載。</p>
+  <section class="card">
+    <form id="form"><label class="upload">選擇 Excel 檔案<input id="files" type="file" accept=".xlsx" multiple required></label>
+      <ul id="list"></ul><p><small>最多 30 份檔案，合計 100 MB。只處理 Detail 分頁，檔案僅在你的瀏覽器內處理，不會上傳。</small></p>
+      <button id="submit" type="submit">開始合併</button>
+    </form><p id="message" role="status" aria-live="polite"></p>
+  </section>
+  <section class="card" id="result" hidden><h2>合併完成</h2><p id="dates"></p><div class="stats" id="stats"></div><a class="download" id="download">下載合併檔案</a></section>
+  <section class="card"><h2>處理規則</h2><ul>
+    <li>以同一天、A 欄製程、E 欄小板序號判定重複；不同日期或製程的紀錄保留。</li>
+    <li>重複資料優先保留 FAIL 整列；狀態相同則保留上傳順序中第一列。</li>
+    <li>依「狀態」標題辨識 GOOD／FAIL；原始欄位位置保持不變。</li>
+    <li>依產出時間排序。檔名採最早資料日期的 ISO 週次（週一開始），跨週合併仍採起始週次。</li>
+  </ul></section>
+</main><script src="site.js" defer></script></body></html>
