@@ -46,6 +46,26 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   const filled=new ExcelJS.Workbook();await filled.xlsx.readFile(await detailDownload.path());
   assert.equal(filled.getWorksheet('Detail').getCell('J2').value,'Goodix');assert.equal(filled.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
   assert.equal(filled.getWorksheet('Detail').getCell('F2').numFmt,'yyyy/mm/dd');assert.equal(filled.getWorksheet('Data').getCell('A1').value,'原始資料');
+  await page.locator('#mergeMatched').click();
+  await page.locator('#mergeResult').waitFor({state:'visible'});
+  const [mergedMatch]=await Promise.all([page.waitForEvent('download'),page.locator('#mergeDownload').click()]);
+  assert.equal(mergedMatch.suggestedFilename(),'2026_w41_1011-1011.xlsx');
+  const mergedMatchedBook=new ExcelJS.Workbook();await mergedMatchedBook.xlsx.readFile(await mergedMatch.path());
+  assert.deepEqual(mergedMatchedBook.worksheets.map(s=>s.name),['Detail']);
+  assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('J2').value,'Goodix');
+  assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
+  const failBook=new ExcelJS.Workbook();await failBook.xlsx.load(await detailBook.xlsx.writeBuffer());
+  failBook.getWorksheet('Detail').getCell('H2').value='不良';failBook.getWorksheet('Detail').getCell('I2').value='FAIL';
+  await page.locator('#mergeFiles').setInputFiles([
+   {name:'good.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await detailBook.xlsx.writeBuffer())},
+   {name:'fail.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await failBook.xlsx.writeBuffer())}
+  ]);
+  await page.locator('#mergeDirect').click();await page.locator('#mergeResult').waitFor({state:'visible'});
+  const [dedupDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#mergeDownload').click()]);
+  const dedupBook=new ExcelJS.Workbook();await dedupBook.xlsx.readFile(await dedupDownload.path());
+  assert.equal(dedupBook.getWorksheet('Detail').rowCount,2);
+  assert.equal(dedupBook.getWorksheet('Detail').getCell('I2').value,'FAIL');
+  assert.equal(dedupBook.getWorksheet('Detail').getCell('H2').value,'不良');
   const preparedExports=await page.evaluate(()=>window.exportRequests);
   const [again]=await Promise.all([page.waitForEvent('download'),page.locator('#export').click()]);
   assert.equal(again.suggestedFilename(),'Detail_IC機種.xlsx');

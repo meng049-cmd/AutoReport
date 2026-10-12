@@ -8,7 +8,7 @@ self.onmessage=async({data:{id,type,payload}})=>{
     if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
-    else if(type==='match'){lastResult=null;lastResult=await matchFile(matcher,payload.bytes,payload.filename);const {detailBytes,...summary}=lastResult;result=summary;}
+    else if(type==='match'){lastResult=null;lastResult=await matchFile(matcher,payload.bytes,payload.filename);const {detailBytes,...summary}=lastResult;result={...summary,detail:Boolean(detailBytes)};}
     else if(type==='export'){if(!lastResult)throw Error('請先比對檔案。');const bytes=await exportMatches(lastResult);result=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);}
     else throw Error('未知操作。');
     self.postMessage({id,result},result instanceof ArrayBuffer?[result]:[]);

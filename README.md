@@ -179,3 +179,19 @@ node --test web/update-browser.spec.mjs
 上傳區的「已上傳檔案」清單會向 GitHub 查詢 database-inputs 內的 Excel，並列出既有資料庫來源檔名。支援檔名搜尋與同名提醒；GitHub 清單讀取失敗時會顯示提示和資料夾連結。一般 Detail 查詢檔只在瀏覽器處理，不會存入 GitHub 清單。即使上傳的 Excel 沒有新對照，工作流程也會發布更新的檔案清單，資料庫與資料更新時間仍保持不變。
 
 批次比對可一次選取多個 Excel／CSV，逐檔處理，每份結果可獨立下載；多份成功結果可下載 ZIP。單一檔案失敗不會中斷其他檔案。同名結果會自動加上編號，避免 ZIP 內互相覆蓋。每個 Excel 的 Detail 仍只增加 J/K，保留 A–I 與其他分頁。
+# Detail 批次合併下載
+
+公開網站：<https://meng049-cmd.github.io/AutoReport/>
+
+「上傳檔案批次比對」完成後，可點 **合併比對後的 Detail**，再點下載連結取得修改後的合併檔。
+若檔案 J/K 已填入 IC／機種，請使用 **Detail 合併與去重 → 直接合併 Detail**，不用再次比對。
+
+- 僅輸出 Detail，依產出時間排序。
+- 以同一天＋A 欄製程＋E 欄小板序號去重；FAIL 整列優先，相同狀態保留第一筆。
+- 狀態依「狀態」標題辨識，可位於 H 或 I；原始欄位順序保留。
+- 名稱如 `2026_w41_1005-1008.xlsx`，依最早日期的 ISO 週次命名；跨週採起始週次。
+- 最多 30 份 .xlsx、合計 100 MB，在瀏覽器背景執行，檔案不會上傳。
+
+合併用的 SheetJS 已放入 `vendor/` 並核對 npm 套件 SHA-512 完整性；執行時不依賴 CDN。
+建置前執行 `npm ci`、安裝 `requirements.txt`，再執行 `npm run build`、`npm test`、`npm run test:browser`。
+發布沿用 `web/publish_pages.py`，以正常 fast-forward push 更新 `gh-pages`，不更改現有 Pages 保護規則。

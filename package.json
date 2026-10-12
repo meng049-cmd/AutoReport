@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node web/build.mjs",
-    "test": "node --test web/matcher.test.mjs web/detail.test.mjs",
+    "test": "node --test web/matcher.test.mjs web/detail.test.mjs web/merge.test.mjs",
     "test:browser": "node --test web/browser.spec.mjs"
   },
   "dependencies": {

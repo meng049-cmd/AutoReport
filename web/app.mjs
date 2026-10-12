@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import {mergeFiles,clearMergedDownload} from './merge-ui.mjs';
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const worker=new Worker(new URL('./worker.js?v='+__BUILD_ID__,import.meta.url),{type:'module'});
@@ -9,7 +10,7 @@ function call(type,payload={},transfer=[]){return new Promise((resolve,reject)=>
 function table(head,rows){return '<div class="scroll"><table><thead><tr>'+head.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
 function sources(items){return '<details><summary>'+items.length+' 筆來源</summary>'+items.map(s=>esc(s['檔案'])+' · '+esc(s['分頁'])+' 第 '+esc(s['列號'])+' 列'+(s['原始IC／機型']?' · 原始 IC／機型：'+esc(s['原始IC／機型']):'')+(s['整理依據']?.length?'<br>'+s['整理依據'].filter(n=>typeof n==='string').map(esc).join('；'):'')).join('<br>')+'</details>'}
 function candidates(items){return items.map(c=>'<b>'+esc(c['機種']||'機種未填')+'</b> / '+esc(c.IC||'未標示')+(c['產品系列'].length?' <span class="badge">'+esc(c['產品系列'].join('、'))+'</span>':'')+sources(c['來源'])).join('<br>')||'—'}
-function clearDownload(){if(downloadUrl)URL.revokeObjectURL(downloadUrl);for(const d of downloads)URL.revokeObjectURL(d.url);downloadUrl=null;downloads=[];$('export').disabled=true;}
+function clearDownload(){$('mergeMatched').disabled=true;clearMergedDownload();if(downloadUrl)URL.revokeObjectURL(downloadUrl);for(const d of downloads)URL.revokeObjectURL(d.url);downloadUrl=null;downloads=[];$('export').disabled=true;}
 function saveDownload(url,name){const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();}
 function error(e){$('message').textContent=e.message;$('message').className='warn'}
 
@@ -37,7 +38,7 @@ $('match').onclick=async()=>{
     const output=await call('export');const base=file.name.replace(/\.(xlsx|csv)$/i,'')+'_IC機種';let name=base+'.xlsx',suffix=2;
     while(used.has(name.toLowerCase()))name=base+'_'+suffix+++'.xlsx';used.add(name.toLowerCase());
     const blob=new Blob([output],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const item={name,blob,url:URL.createObjectURL(blob)};downloads.push(item);
+    const item={name,blob,url:URL.createObjectURL(blob),detail:r.detail};downloads.push(item);
     button='<button type="button" data-download="'+(downloads.length-1)+'" class="secondary">下載此檔結果</button>';
    }
    reports.push('<section><h3>'+esc(file.name)+'</h3><p style="white-space:pre-wrap">'+esc(summary)+'</p>'+button+table(['分頁／列號','狀態','機種','IC','候選與來源'],r['結果'].slice(0,200).map(i=>[esc(i['分頁'])+' / '+i['列號'],esc(i['狀態']),esc(i['機種']),esc(i.IC),candidates(i['候選'])]))+(r['筆數']>200?'<p>畫面顯示前 200 筆，下載包含全部結果。</p>':'')+'</section>');
@@ -49,11 +50,12 @@ $('match').onclick=async()=>{
   $('message').textContent='正在打包全部下載檔…';const zip=new JSZip();for(const d of downloads)zip.file(d.name,await d.blob.arrayBuffer());
   downloadUrl=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'}));
  }
- $('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
+ $('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
  if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案。`;
  }catch(e){error(e);$('export').disabled=!downloads.length;}
  finally{$('match').disabled=false;$('file').disabled=false;}
 };
+$('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)));
 $('uploadResults').onclick=e=>{const button=e.target.closest('[data-download]');if(!button)return;const d=downloads[Number(button.dataset.download)];if(d)saveDownload(d.url,d.name);};
 $('file').onchange=()=>{clearDownload();$('uploadResults').innerHTML='';$('export').textContent='匯出 Excel';$('message').textContent='已選擇 '+$('file').files.length+' 個檔案，請點「開始比對」。';};
 $('export').onclick=()=>{
