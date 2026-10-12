@@ -64,5 +64,5 @@ function buildYieldReport(merger){
  book.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true}};
  return {book,filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:pendingRows.length,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
 }
-root.buildYieldReport=buildYieldReport;
+root.buildYieldReport=buildYieldReport;root.canonicalProcess=canonical;
 })(typeof self!=='undefined'?self:globalThis);

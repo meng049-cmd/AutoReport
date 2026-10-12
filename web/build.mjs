@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const hash=createHash('sha256');
-for(const file of ['web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','web/yield-ui.mjs','web/index.html'])hash.update(await readFile(file));
+for(const file of ['web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/index.html'])hash.update(await readFile(file));
 const buildId=hash.digest('hex').slice(0,12);
 await rm('dist',{recursive:true,force:true});await mkdir('dist/assets',{recursive:true});
 execFileSync(existsSync('.venv/bin/python')?'.venv/bin/python':'python',['web/export_reference.py','dist/reference.json']);
@@ -12,7 +12,7 @@ await build({entryPoints:{app:'web/app.mjs',worker:'web/worker.mjs'},bundle:true
 await writeFile('dist/index.html',(await readFile('web/index.html','utf8')).replace('./assets/app.js','./assets/app.js?v='+buildId));await writeFile('dist/.nojekyll','');
 await copyFile('data/autoreport.sqlite3','dist/autoreport.sqlite3');
 await mkdir('dist/vendor');
-for(const file of ['merge-core.js','merge-worker.js','yield-core.js','yield-worker.js'])await copyFile(file,'dist/'+file);
+for(const file of ['merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js'])await copyFile(file,'dist/'+file);
 for(const file of ['xlsx.full.min.js','LICENSE.xlsx'])await copyFile('vendor/'+file,'dist/vendor/'+file);
 await mkdir('dist/downloads');
 for(const name of ['AutoReport_query_template.xlsx','AutoReport_sample_results.xlsx','AutoReport_summary.xlsx'])await copyFile('downloads/'+name,'dist/downloads/'+name);

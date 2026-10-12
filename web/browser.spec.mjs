@@ -57,12 +57,33 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   await page.locator('#yieldFile').setInputFiles({name:'master.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile(await mergedMatch.path())});
   await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
   const [yieldDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
-  assert.equal(yieldDownload.suggestedFilename(),'2026_w41_1011-1011_每日良率.xlsx');
+  assert.equal(yieldDownload.suggestedFilename(),'2026_w41_1011-1011_每日良率_不良分析.xlsx');
   const yieldBook=new ExcelJS.Workbook();await yieldBook.xlsx.readFile(await yieldDownload.path());
-  assert.deepEqual(yieldBook.worksheets.map(s=>s.name),['每日製程良率','每日階段良率','計算明細','Detail']);
+  assert.deepEqual(yieldBook.worksheets.slice(0,4).map(s=>s.name),['每日製程良率','每日階段良率','計算明細','Detail']);
   assert.equal(yieldBook.getWorksheet('計算明細').getCell('E2').value,1);
   assert.equal(yieldBook.getWorksheet('計算明細').getCell('H2').value.result,1);
   assert.match(yieldBook.getWorksheet('每日階段良率').getCell('B4').value.formula,/AGGREGATE/);
+  assert.equal(yieldBook.getWorksheet('品質總覽').getCell('B2').value,1);
+  assert.equal(await page.locator('#qualityDashboard').isVisible(),true);
+  await page.locator('#qualityProduct').selectOption({label:'Goodix／Taroko 14'});
+  assert.match(await page.locator('#qualityProducts').innerText(),/100.00%/);
+  assert.match(await page.locator('#qualityProductDefects').innerText(),/加總 0 不良片/);
+  const qualityFixture=new ExcelJS.Workbook();await qualityFixture.xlsx.load(await mergedMatchedBook.xlsx.writeBuffer());
+  const qualityDetail=qualityFixture.getWorksheet('Detail');qualityDetail.getCell('H2').value='首次不良';qualityDetail.getCell('I2').value='FAIL';
+  const otherFailure=qualityDetail.getRow(2).values.slice(1);otherFailure[0]='第二製程';otherFailure[5]=new Date('2026-10-12');otherFailure[7]='其他不良';qualityDetail.addRow(otherFailure);
+  const goodUnit=qualityDetail.getRow(2).values.slice(1);goodUnit[4]='second-unit';goodUnit[7]=null;goodUnit[8]='GOOD';qualityDetail.addRow(goodUnit);
+  await page.locator('#yieldFile').setInputFiles({name:'quality.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await qualityFixture.xlsx.writeBuffer())});
+  await page.locator('#yieldCalculate').click();await page.locator('#qualityDashboard').waitFor({state:'visible'});
+  assert.match(await page.locator('#qualityMetrics').innerText(),/50.00%/);
+  assert.match(await page.locator('#qualityGlobalDefects').innerText(),/加總 1 不良片 ÷ 2 總片＝50.00%/);
+  const [qualityDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
+  const qualityOutput=new ExcelJS.Workbook();await qualityOutput.xlsx.readFile(await qualityDownload.path());
+  assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('B2').value,2);
+  assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('F2').value,.5);
+  assert.equal(qualityOutput.getWorksheet('全產品不良排名').rowCount,2);
+  assert.equal(qualityOutput.getWorksheet('全產品不良排名').getCell('C2').value,'首次不良');
+
+
 
   const failBook=new ExcelJS.Workbook();await failBook.xlsx.load(await detailBook.xlsx.writeBuffer());
   failBook.getWorksheet('Detail').getCell('H2').value='不良';failBook.getWorksheet('Detail').getCell('I2').value='FAIL';
