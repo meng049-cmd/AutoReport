@@ -1,4 +1,4 @@
-const $=id=>document.getElementById(id);let analysis;
+const $=id=>document.getElementById(id);let analysis,selectedProcess='',selectedDefect='';
 const percent=value=>(value*100).toFixed(2)+'%';
 function table(target,headers,rows){
  const wrap=document.createElement('div');wrap.className='scroll';const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody'),tr=document.createElement('tr');
@@ -8,8 +8,14 @@ function table(target,headers,rows){
  table.append(head,body);wrap.append(table);$(target).replaceChildren(wrap);
 }
 function ranking(target,items,total){
- table(target,['排名','歸屬製程','不良項目','不良片數','分母：總片數','不良比例'],items.map(d=>[d.rank,d.process,d.defect,d.count,total,percent(d.count/total)]));
- const count=items.reduce((sum,d)=>sum+d.count,0),note=document.createElement('p');note.className='muted';note.textContent=`加總 ${count.toLocaleString()} 不良片 ÷ ${total.toLocaleString()} 總片＝${percent(total?count/total:0)}。每片僅歸屬一個製程＋不良項目。`;$(target).append(note);
+ table(target,['排名','歸屬製程','不良項目','不良片數','分母：總片數','不良比例'],items.slice(0,5).map(d=>[d.rank,d.process,d.defect,d.count,total,percent(d.count/total)]));
+ const count=items.reduce((sum,d)=>sum+d.count,0),note=document.createElement('p');note.className='muted';note.textContent=`全部項目加總 ${count.toLocaleString()} 不良片 ÷ ${total.toLocaleString()} 總片＝${percent(total?count/total:0)}。畫面僅顯示 TOP5；每片僅歸屬一個製程＋不良項目，完整資料保留於 Excel。`;$(target).append(note);
+}
+
+function chart(id,items,label,ratio,click,active,isYield=false){
+ const node=$(id);node.replaceChildren();
+ for(const item of items){const button=document.createElement('button'),text=document.createElement('span'),track=document.createElement('span'),bar=document.createElement('span');button.type='button';button.className='chart-button';button.setAttribute('aria-pressed',String(Boolean(active(item))));text.textContent=label(item);track.className='quality-track';bar.className=isYield?'quality-bar yield-bar':'quality-bar';bar.style.width=(Math.max(0,Math.min(1,ratio(item)))*100)+'%';track.append(bar);button.append(text,track);button.onclick=()=>click(item);node.append(button);}
+ if(!items.length)node.textContent='沒有符合的資料。';
 }
 function render(){
  if(!analysis)return;const product=analysis.products.find(p=>p.id===$('qualityProduct').value);
@@ -23,11 +29,21 @@ function render(){
  const process=product?a.productProcesses.filter(p=>p.product===product.id):a.processes;
  table('qualityProcesses',['製程','經過製程總片數','GOOD片','FAIL片','製程總良率'],process.map(p=>[p.process,p.total,p.good,p.fail,percent(p.yield)]));
  $('qualityProcessTitle').textContent=product?`${product.ic}／${product.model}：各製程總良率`:'全產品：各製程總良率';
- const chart=$('qualityChart');chart.replaceChildren();
- for(const d of (product?product.defects:a.defects).slice(0,10)){const div=document.createElement('div'),label=document.createElement('div'),track=document.createElement('div'),bar=document.createElement('div');label.textContent=`${d.process}／${d.defect}：${d.count} 片（${percent(d.count/(product?product.total:a.total))}）`;track.className='quality-track';bar.className='quality-bar';bar.style.width=((d.count/((product?product.defects:a.defects)[0]?.count||1))*100)+'%';track.append(bar);div.append(label,track);chart.append(div);}
- if(!chart.children.length)chart.textContent='沒有不良資料。';
+ chart('qualityChart',product?product.defects.slice(0,5):[],d=>`${d.process}／${d.defect}：${d.count} 片（${percent(d.count/(product?product.total:a.total))}）`,d=>d.count/((product?product.defects:a.defects)[0]?.count||1),d=>{selectedProcess=d.process;selectedDefect=d.defect;render();},d=>selectedProcess===d.process&&selectedDefect===d.defect);
+ if(!product)$('qualityChart').textContent='請點選產品圖表或選擇 IC／機種，查看產品不良 TOP5。';
+ chart('qualityGlobalChart',a.defects.slice(0,5),d=>`${d.process}／${d.defect}：${d.count} 片（${percent(d.rate)}）`,d=>d.count/(a.defects[0]?.count||1),d=>{selectedProcess=d.process;selectedDefect=d.defect;render();},d=>selectedProcess===d.process&&selectedDefect===d.defect);
+ const linkedProducts=a.products.filter(p=>selectedDefect?p.defects.some(d=>d.process===selectedProcess&&d.defect===selectedDefect):selectedProcess?a.productProcesses.some(v=>v.product===p.id&&v.process===selectedProcess):true);
+ chart('qualityProductChart',linkedProducts,p=>`${p.ic}／${p.model}：良率 ${percent(p.yield)}，${p.total.toLocaleString()} 片，不良貢獻 ${percent(p.contribution)}`,p=>p.yield,p=>{$('qualityProduct').value=p.id;render();},p=>p.id===product?.id,true);
+ chart('qualityProcessChart',selectedProcess?process.filter(p=>p.process===selectedProcess):process,p=>`${p.process}：良率 ${percent(p.yield)}，GOOD ${p.good}／FAIL ${p.fail}`,p=>p.yield,p=>{selectedProcess=p.process;selectedDefect='';render();},p=>p.process===selectedProcess,true);
+ $('qualitySelection').textContent=`目前連動：${product?product.ic+'／'+product.model:'全部產品'}${selectedProcess?' → '+selectedProcess:''}${selectedDefect?' → '+selectedDefect:''}`;
+ const matched=a.products.filter(p=>!product||p.id===product.id).flatMap(p=>p.defects.filter(d=>(!selectedProcess||d.process===selectedProcess)&&(!selectedDefect||d.defect===selectedDefect)).map(d=>{const process=a.productProcesses.find(v=>v.product===p.id&&v.process===d.process);return [p.ic,p.model,d.process,d.defect,d.count,p.total,percent(d.rate),percent(d.count/a.total),process?.good||0,process?.fail||0];}));
+ table('qualityLinkedDetails',['IC','機種','製程','不良項目','歸屬不良片數','產品總片數','產品內比例','占全體比例','製程GOOD片','製程FAIL片'],matched);
+ const attributed=a.attribution.filter(r=>(!product||(r.ic===product.ic&&r.model===product.model))&&(!selectedProcess||r.process===selectedProcess)&&(!selectedDefect||r.defect===selectedDefect));
+ table('qualityLinkedPPID',['IC','機種','PPID','首次FAIL日期','歸屬製程','不良項目'],attributed.slice(0,100).map(r=>[r.ic,r.model,r.serial,r.date,r.process,r.defect]));
+ $('qualityLinkedCount').textContent=`符合 ${attributed.length.toLocaleString()} 片，顯示前 100 片，完整明細可下載 Excel。`;
+
 }
-export function clearQuality(){analysis=null;$('qualityDashboard').hidden=true;}
+export function clearQuality(){analysis=null;selectedProcess='';selectedDefect='';$('qualityDashboard').hidden=true;}
 export function renderQuality(data,start,end){
  analysis=data;$('qualityPeriod').textContent=`主檔日期：${start} 至 ${end}。全產品總片數只依 PPID（小板序號）去重，跨站、重複過站、跨日期不重複。`;
  const select=$('qualityProduct');select.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='全部產品';select.append(all);
@@ -36,3 +52,4 @@ export function renderQuality(data,start,end){
  $('qualityDashboard').hidden=false;render();
 }
 $('qualityProduct').onchange=render;
+$('qualityClearSelection').onclick=()=>{selectedProcess='';selectedDefect='';$('qualityProduct').value='';render();};
