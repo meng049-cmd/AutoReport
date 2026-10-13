@@ -14,3 +14,19 @@ test('threshold equality passes and absent stages are never flagged',()=>{
  const checks=[{product:quality.products[0].id,ic:'Goodix',model:'Model',date:'2026-10-05',stage:'SMT',yield:.995,processes:['正面AOI']},{product:quality.products[0].id,stage:'前段',yield:.98,processes:[]},{product:quality.products[0].id,stage:'後段',yield:.99,processes:[]}];
  assert.equal(buildThresholdAnalysis(merger,{...report.calculation,stageChecks:checks},quality.identities).below.length,0);assert.equal(report.calculation.stageChecks.length,1);
 });
+test('stage defect shares use unique failed PPID and sum to one within each product/day/stage',()=>{
+ const {quality,report,result}=run([
+  row('a','DAF外觀','FAIL','偏移'),row('b','DAF外觀','FAIL','偏移'),row('c','DAF外觀','GOOD',null),
+  row('a','功能一測試','FAIL','其他'),row('c','功能一測試','FAIL','功能不良'),
+  row('d','DAF外觀','GOOD',null),row('e','正面AOI','FAIL','AOI不良'),
+  row('f','DAF外觀','FAIL','隔日',6),row('g','DAF外觀','FAIL','其他產品',5,'Elan')
+ ]);
+ const front=result.rows.filter(r=>r.ic==='Goodix'&&r.date==='2026-10-05'&&r.stage==='前段');
+ assert.equal(front.length,2);assert.equal(front.reduce((n,r)=>n+r.stageDefectShare,0),1);
+ const offset=front.find(r=>r.defect==='偏移'),other=front.find(r=>r.defect==='功能不良');
+ assert.equal(offset.count,2);assert.equal(offset.stageFailTotal,3);assert.equal(offset.stageDefectShare,2/3);assert.equal(other.stageDefectShare,1/3);
+ for(const r of result.rows.filter(r=>!front.includes(r))){assert.equal(r.stageFailTotal,1);assert.equal(r.stageDefectShare,1);}
+ appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
+ const sheet=report.book.Sheets['未達標分析'],index=result.rows.indexOf(offset)+2;
+ assert.equal(sheet['S'+index].v,3);assert.equal(sheet['T'+index].v,2/3);assert.equal(sheet['T'+index].z,'0.0000%');
+});
