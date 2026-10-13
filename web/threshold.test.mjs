@@ -14,19 +14,24 @@ test('threshold equality passes and absent stages are never flagged',()=>{
  const checks=[{product:quality.products[0].id,ic:'Goodix',model:'Model',date:'2026-10-05',stage:'SMT',yield:.995,processes:['正面AOI']},{product:quality.products[0].id,stage:'前段',yield:.98,processes:[]},{product:quality.products[0].id,stage:'後段',yield:.99,processes:[]}];
  assert.equal(buildThresholdAnalysis(merger,{...report.calculation,stageChecks:checks},quality.identities).below.length,0);assert.equal(report.calculation.stageChecks.length,1);
 });
-test('stage defect shares use unique failed PPID and sum to one within each product/day/stage',()=>{
+test('all-product composition counts all FAIL records across products and dates, with no first-failure attribution',()=>{
  const {quality,report,result}=run([
-  row('a','DAF外觀','FAIL','偏移'),row('b','DAF外觀','FAIL','偏移'),row('c','DAF外觀','GOOD',null),
-  row('a','功能一測試','FAIL','其他'),row('c','功能一測試','FAIL','功能不良'),
-  row('d','DAF外觀','GOOD',null),row('e','正面AOI','FAIL','AOI不良'),
-  row('f','DAF外觀','FAIL','隔日',6),row('g','DAF外觀','FAIL','其他產品',5,'Elan')
+  row('a','DAF外觀','FAIL','偏移'),row('a','功能一測試','FAIL','功能不良'),
+  row('b','DAF外觀檢查','FAIL','偏移',5,'Elan'),row('a','DAF外觀','FAIL','偏移',6),
+  row('c','DAF外觀','FAIL','其他'),row('c','DAF外觀','GOOD',null),
+  row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL',null),row('f','DAF外觀','GOOD',null)
  ]);
- const front=result.rows.filter(r=>r.ic==='Goodix'&&r.date==='2026-10-05'&&r.stage==='前段');
- assert.equal(front.length,2);assert.equal(front.reduce((n,r)=>n+r.stageDefectShare,0),1);
- const offset=front.find(r=>r.defect==='偏移'),other=front.find(r=>r.defect==='功能不良');
- assert.equal(offset.count,2);assert.equal(offset.stageFailTotal,3);assert.equal(offset.stageDefectShare,2/3);assert.equal(other.stageDefectShare,1/3);assert.equal(offset.processDefectShare,1);assert.equal(other.processFail,2);assert.equal(other.processDefectShare,1/2);
- for(const r of result.rows.filter(r=>!front.includes(r))){assert.equal(r.stageFailTotal,1);assert.equal(r.stageDefectShare,1);}
+ const offset=result.composition.find(r=>r.defect==='偏移'),functional=result.composition.find(r=>r.defect==='功能不良');
+ assert.equal(offset.count,3);assert.equal(offset.processTotal,4);assert.equal(offset.stageTotal,5);assert.equal(offset.processShare,.75);assert.equal(offset.stageShare,.6);assert.equal(functional.count,1);
+ assert.equal(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0),1);
+ assert.equal(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0),1);
+ assert.equal(result.composition.reduce((n,r)=>n+r.count,0),7);
+ const unknown=result.composition.find(r=>r.process==='背面AOI');assert.equal(unknown.stageShare,null);assert.equal(unknown.processShare,1);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
- const sheet=report.book.Sheets['未達標分析'],index=result.rows.indexOf(offset)+2;
- assert.equal(sheet['S'+index].v,3);assert.equal(sheet['T'+index].v,2/3);assert.equal(sheet['T'+index].z,'0.0000%');assert.equal(sheet['U'+index].v,1);assert.equal(sheet['U'+index].z,'0.0000%');const otherIndex=result.rows.indexOf(other)+2;assert.equal(sheet['U'+otherIndex].v,1/2);
+ const sheet=report.book.Sheets['全產品不良項目占比'],index=result.composition.indexOf(offset)+2;
+ assert.equal(sheet['D'+index].v,3);assert.equal(sheet['G'+index].v,.75);assert.equal(sheet['H'+index].v,.6);assert.equal(sheet['H'+index].z,'0.0000%');
+});
+test('empty FAIL composition exports headers without dividing by zero',()=>{
+ const {quality,report,result}=run([row('a','正面AOI','GOOD',null)]);assert.equal(result.composition.length,0);
+ appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);assert.equal(report.book.Sheets['全產品不良項目占比']['!ref'],'A1:H1');
 });
