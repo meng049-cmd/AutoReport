@@ -6,19 +6,21 @@ function canonical(value){
  const aliases={'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測試':'功能一測試','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮測試':'外觀檢查點亮測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測試':'輝度機測試','輝度機測':'輝度機測試'};
  return aliases[name]||name;
 }
-function buildYieldReport(merger){
+function buildYieldReport(merger,identities){
  const XLSX=merger.XLSX,counts=new Map(),products=new Map(),processes=new Set(preferred),pendingRows=[];
  if(merger.time!==5)throw Error('主檔 F 欄須為產出時間。');
  if(merger.header?.[9]!=='IC'||merger.header?.[10]!=='機種')throw Error('主檔 J 欄須為 IC、K 欄須為機種，請先完成比對。');
  for(const value of merger.rows.values()){
-  const row=value.row,ic=String(row[9]??'').trim(),model=String(row[10]??'').trim();
-  const incomplete=!ic||!model;if(incomplete)pendingRows.push(row);
-  const product=JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
+  const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=String(row[10]??'').trim(),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
+  const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel)pendingRows.push(row);
+  const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
   products.set(product,{ic:ic||'【待補 IC】',model:model||'【待補機種】',incomplete});processes.add(process);
-  const count=counts.get(key)||{ic,model,day:value.day,process,good:0,fail:0};
-  if(String(row[merger.status]).trim().toUpperCase()==='FAIL')count.fail++;else count.good++;
+  const count=counts.get(key)||{product,ic,model,day:value.day,process,good:0,fail:0,units:new Map()};
+  const serial=String(row[4]).trim();count.units.set(serial,Boolean(count.units.get(serial)||String(row[merger.status]).trim().toUpperCase()==='FAIL'));
   counts.set(key,count);
  }
+ for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
+ const stageChecks=[];
  const merged=merger.finish(),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
@@ -49,6 +51,7 @@ function buildYieldReport(merger){
     const column=XLSX.utils.encode_col(c+1),from=start+offset,to=from+length-1;
     const values=order.slice(offset,offset+length).map(process=>counts.get(JSON.stringify([product,dates[c],process]))).filter(Boolean).map(v=>v.good/(v.good+v.fail));
     const formula=stage==='SMT'?`IF('每日製程良率'!${column}${from}="","",'每日製程良率'!${column}${from})`:`IFERROR(_xlfn.AGGREGATE(1,6,'每日製程良率'!${column}${from}:${column}${to}),"")`;
+    if(values.length)stageChecks.push({product,ic,model,date:dates[c],stage,yield:values.reduce((a,b)=>a+b,0)/values.length,processes:order.slice(offset,offset+length)});
     stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:values.length?'n':'s',v:values.length?values.reduce((a,b)=>a+b,0)/values.length:'',f:formula,z:'0.00%'};
    }
   }
@@ -62,7 +65,7 @@ function buildYieldReport(merger){
  XLSX.utils.book_append_sheet(book,merged.book.Sheets.Detail,'Detail');
  if(pendingRows.length){const pending=XLSX.utils.aoa_to_sheet([merger.header,...pendingRows]);for(let r=2;r<=pendingRows.length+1;r++)if(pending['F'+r])pending['F'+r].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,pending,'待補產品資料');}
  book.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true}};
- return {book,filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:pendingRows.length,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
+ return {book,calculation:{stageChecks,dailyCounts:[...counts.values()].map(({units,...count})=>count)},filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:pendingRows.length,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
 }
 root.buildYieldReport=buildYieldReport;root.canonicalProcess=canonical;
 })(typeof self!=='undefined'?self:globalThis);

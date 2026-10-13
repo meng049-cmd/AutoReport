@@ -38,7 +38,8 @@ function analyzeQuality(merger){
   return {id:p.id,ic:p.ic,model:p.model,pending:p.pending,total,good:total-fail,fail,yield:total?(total-fail)/total:0,badRate:total?fail/total:0,contribution:globalTotal?fail/globalTotal:0,defects:ranking([...productDefects.values()].filter(d=>d.product===p.id),total)};
  }).sort((a,b)=>b.fail-a.fail||a.model.localeCompare(b.model)||a.ic.localeCompare(b.ic));
  const processRows=map=>[...map.values()].map(p=>{const total=p.units.size,fail=[...p.units.values()].filter(Boolean).length;const {units:ignored,...meta}=p;return {...meta,total,good:total-fail,fail,yield:total?(total-fail)/total:0};}).sort((a,b)=>a.yield-b.yield||a.process.localeCompare(b.process));
- return {total:globalTotal,good:globalTotal-globalFail,fail:globalFail,badRate:globalTotal?globalFail/globalTotal:0,yield:globalTotal?(globalTotal-globalFail)/globalTotal:0,products:productRows,defects:ranking([...globalDefects.values()],globalTotal),processes:processRows(processes),productProcesses:processRows(productProcesses),attribution,identityConflicts};
+ const result={total:globalTotal,good:globalTotal-globalFail,fail:globalFail,badRate:globalTotal?globalFail/globalTotal:0,yield:globalTotal?(globalTotal-globalFail)/globalTotal:0,products:productRows,defects:ranking([...globalDefects.values()],globalTotal),processes:processRows(processes),productProcesses:processRows(productProcesses),attribution,identityConflicts};
+ Object.defineProperty(result,'identities',{value:new Map([...units.values()].map(u=>[u.serial,products.get(u.product)]))});return result;
 }
 function appendQualitySheets(XLSX,book,analysis){
  const append=(name,rows,percentColumns)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of percentColumns){const cell=sheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.00%';}sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,name);};
