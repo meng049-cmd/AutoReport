@@ -1,0 +1,4 @@
+(function(root){
+function storage(write,value){return new Promise((resolve,reject)=>{const request=indexedDB.open('AutoReport-local-database',1);request.onupgradeneeded=()=>request.result.createObjectStore('state');request.onerror=()=>reject(Error('無法使用瀏覽器儲存空間，請允許網站儲存資料。'));request.onsuccess=()=>{const db=request.result,tx=db.transaction('state',write?'readwrite':'readonly'),store=tx.objectStore('state'),operation=write?store.put(value,'active'):store.get('active');let result;operation.onsuccess=()=>result=operation.result;tx.oncomplete=()=>{db.close();resolve(write?value:result)};tx.onabort=tx.onerror=()=>{db.close();reject(Error('儲存失敗，原有瀏覽器資料庫未變更。'))};};});}
+root.readBrowserDatabase=()=>storage(false);root.saveBrowserDatabase=value=>storage(true,value);
+})(globalThis);
