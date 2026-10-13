@@ -24,9 +24,9 @@ test('stage defect shares use unique failed PPID and sum to one within each prod
  const front=result.rows.filter(r=>r.ic==='Goodix'&&r.date==='2026-10-05'&&r.stage==='前段');
  assert.equal(front.length,2);assert.equal(front.reduce((n,r)=>n+r.stageDefectShare,0),1);
  const offset=front.find(r=>r.defect==='偏移'),other=front.find(r=>r.defect==='功能不良');
- assert.equal(offset.count,2);assert.equal(offset.stageFailTotal,3);assert.equal(offset.stageDefectShare,2/3);assert.equal(other.stageDefectShare,1/3);
+ assert.equal(offset.count,2);assert.equal(offset.stageFailTotal,3);assert.equal(offset.stageDefectShare,2/3);assert.equal(other.stageDefectShare,1/3);assert.equal(offset.processDefectShare,1);assert.equal(other.processFail,2);assert.equal(other.processDefectShare,1/2);
  for(const r of result.rows.filter(r=>!front.includes(r))){assert.equal(r.stageFailTotal,1);assert.equal(r.stageDefectShare,1);}
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
  const sheet=report.book.Sheets['未達標分析'],index=result.rows.indexOf(offset)+2;
- assert.equal(sheet['S'+index].v,3);assert.equal(sheet['T'+index].v,2/3);assert.equal(sheet['T'+index].z,'0.0000%');
+ assert.equal(sheet['S'+index].v,3);assert.equal(sheet['T'+index].v,2/3);assert.equal(sheet['T'+index].z,'0.0000%');assert.equal(sheet['U'+index].v,1);assert.equal(sheet['U'+index].z,'0.0000%');const otherIndex=result.rows.indexOf(other)+2;assert.equal(sheet['U'+otherIndex].v,1/2);
 });
