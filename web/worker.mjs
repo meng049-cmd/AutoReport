@@ -1,11 +1,13 @@
+import '../browser-storage.js';
 import {Matcher} from './matcher.mjs';
 import {matchFile,exportMatches} from './files.mjs';
 let matcher,lastResult;
-const ready=fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('對照資料載入失敗，請重新整理。');matcher=new Matcher(await r.json());});
+const ready=fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('對照資料載入失敗，請重新整理。');const local=await readBrowserDatabase().catch(()=>null);matcher=new Matcher(local?.reference||await r.json());});
 self.onmessage=async({data:{id,type,payload}})=>{
   try{
     await ready;let result;
-    if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
+    if(type==='reload'){matcher=new Matcher(payload.reference);lastResult=null;result=true;}
+    else if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
     else if(type==='match'){lastResult=null;lastResult=await matchFile(matcher,payload.bytes,payload.filename);const {detailBytes,...summary}=lastResult;result={...summary,detail:Boolean(detailBytes)};}

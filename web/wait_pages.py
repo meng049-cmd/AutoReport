@@ -11,7 +11,7 @@ for attempt in range(60):
     try:
         with urlopen(url, timeout=30) as response:
             html = response.read().decode('utf-8')
-        if f'assets/app.js?v={expected}' in html and 'id="mergeDirect"' in html and 'id="yieldCalculate"' in html and 'id="qualityDashboard"' in html:
+        if f'assets/app.js?v={expected}' in html and 'id="mergeDirect"' in html and 'id="yieldCalculate"' in html and 'id="qualityDashboard"' in html and 'id="databaseFile"' in html:
             print('Verified deployed website version:', expected)
             break
     except (URLError, TimeoutError) as error:
