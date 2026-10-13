@@ -15,6 +15,11 @@ test('unique units and one primary process/defect reconcile every ranking to ove
  const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);assert.equal(book.Sheets['品質總覽'].F2.v,.6);assert.equal(book.Sheets['全產品不良排名'].F2.v,.4);
  const loaded=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});assert.equal(loaded.Sheets['品質總覽'].B2.v,5);
 });
-test('same serial in different products is distinct; missing defects remain reconcilable',()=>{
- const a=analyze([row('same','P1','FAIL',null),row('same','P1','GOOD',null,6,'B')]);assert.equal(a.total,2);assert.equal(a.fail,1);assert.equal(a.defects[0].defect,'【未填不良項目】');
+test('one PPID with contradictory products is counted once and explicitly pending',()=>{
+ const a=analyze([row('same','P1','FAIL',null),row('same','P1','GOOD',null,6,'B')]);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.identityConflicts.length,1);assert.equal(a.products[0].pending,true);assert.equal(a.defects[0].defect,'【未填不良項目】');
+});
+
+test('cross-station and cross-day observations with blank mappings never increase total PPID quantity',()=>{
+ const rows=[row('ppid','P1','GOOD',null),row('ppid','P2','FAIL','bad',6,''),row('ppid','P1','GOOD',null,7),row('second','P1','GOOD',null)];rows[1][10]='';
+ const a=analyze(rows);assert.equal(a.total,2);assert.equal(a.fail,1);assert.equal(a.products.length,1);assert.equal(a.products[0].total,2);assert.equal(a.badRate,.5);assert.equal(a.defects[0].rate,.5);assert.equal(a.processes.find(p=>p.process==='P1').total,2);
 });

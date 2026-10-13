@@ -29,9 +29,10 @@ function render(){
 }
 export function clearQuality(){analysis=null;$('qualityDashboard').hidden=true;}
 export function renderQuality(data,start,end){
- analysis=data;$('qualityPeriod').textContent=`主檔日期：${start} 至 ${end}。各產品總片數依 IC＋機種＋小板序號去重，跨日期不重複。`;
+ analysis=data;$('qualityPeriod').textContent=`主檔日期：${start} 至 ${end}。全產品總片數只依 PPID（小板序號）去重，跨站、重複過站、跨日期不重複。`;
  const select=$('qualityProduct');select.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='全部產品';select.append(all);
  for(const p of data.products){const option=document.createElement('option');option.value=p.id;option.textContent=p.ic+'／'+p.model;select.append(option);}
+ if(data.identityConflicts.length)$('qualityPeriod').textContent+=` 有 ${data.identityConflicts.length} 個 PPID 對照衝突，僅計一片，另列待確認並附明細。`;
  $('qualityDashboard').hidden=false;render();
 }
 $('qualityProduct').onchange=render;
