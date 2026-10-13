@@ -19,19 +19,19 @@ test('all-product composition counts all FAIL records across products and dates,
   row('a','DAF外觀','FAIL','偏移'),row('a','功能一測試','FAIL','功能不良'),
   row('b','DAF外觀檢查','FAIL','偏移',5,'Elan'),row('a','DAF外觀','FAIL','偏移',6),
   row('c','DAF外觀','FAIL','其他'),row('c','DAF外觀','GOOD',null),
-  row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL',null),row('f','DAF外觀','GOOD',null)
+  row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL',null),row('f','DAF外觀','GOOD',null),row('g','功能一測試','GOOD',null)
  ]);
  const offset=result.composition.find(r=>r.defect==='偏移'),functional=result.composition.find(r=>r.defect==='功能不良');
- assert.equal(offset.count,3);assert.equal(offset.processTotal,4);assert.equal(offset.stageTotal,5);assert.equal(offset.processShare,.75);assert.equal(offset.stageShare,.6);assert.equal(functional.count,1);
- assert.equal(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0),1);
- assert.equal(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0),1);
+ assert.equal(offset.count,3);assert.equal(offset.processTotal,5);assert.equal(offset.stageTotal,7);assert.equal(offset.processGood,1);assert.equal(offset.processFail,4);assert.equal(offset.stageGood,2);assert.equal(offset.stageFail,5);assert.equal(offset.processShare,3/5);assert.equal(offset.stageShare,3/7);assert.equal(functional.count,1);
+ assert.ok(Math.abs(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0)-5/7)<1e-12);
+ assert.equal(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0),4/5);
  assert.equal(result.composition.reduce((n,r)=>n+r.count,0),7);
  const unknown=result.composition.find(r=>r.process==='背面AOI');assert.equal(unknown.stageShare,null);assert.equal(unknown.processShare,1);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
  const sheet=report.book.Sheets['全產品不良項目占比'],index=result.composition.indexOf(offset)+2;
- assert.equal(sheet['D'+index].v,3);assert.equal(sheet['G'+index].v,.75);assert.equal(sheet['H'+index].v,.6);assert.equal(sheet['H'+index].z,'0.0000%');
+ assert.equal(sheet['D'+index].v,3);assert.equal(sheet['G'+index].v,3/5);assert.equal(sheet['H'+index].v,3/7);assert.equal(sheet['H'+index].z,'0.0000%');
 });
 test('empty FAIL composition exports headers without dividing by zero',()=>{
  const {quality,report,result}=run([row('a','正面AOI','GOOD',null)]);assert.equal(result.composition.length,0);
- appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);assert.equal(report.book.Sheets['全產品不良項目占比']['!ref'],'A1:H1');
+ appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);assert.equal(report.book.Sheets['全產品不良項目占比']['!ref'],'A1:L1');
 });

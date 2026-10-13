@@ -16,6 +16,6 @@ $('thresholdReset').onclick=()=>{for(const id of ['thresholdProduct','thresholdD
 
 function renderComposition(rows){
  const table=document.createElement('table'),head=document.createElement('thead'),body=document.createElement('tbody'),header=document.createElement('tr');
- for(const title of ['階段','歸屬製程','不良項目','不良項目總數（筆）','製程不良總數（筆）','階段不良總數（筆）','占所屬製程不良比例','占所屬階段不良比例']){const th=document.createElement('th');th.textContent=title;header.append(th);}head.append(header);
- for(const r of rows){const tr=document.createElement('tr');for(const value of [r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal??'—',pct(r.processShare,4),r.stageShare===null?'—':pct(r.stageShare,4)]){const td=document.createElement('td');td.textContent=String(value);tr.append(td);}body.append(tr);}table.append(head,body);$('defectCompositionTable').replaceChildren(table);if(!rows.length)$('defectCompositionTable').textContent='主檔沒有 FAIL 紀錄。';
+ for(const title of ['階段','歸屬製程','不良項目','不良項目總數（筆）','製程投入數（GOOD＋FAIL）','階段投入數（GOOD＋FAIL）','占製程投入數的不良比例','占階段投入數的不良比例','製程GOOD','製程FAIL','階段GOOD','階段FAIL']){const th=document.createElement('th');th.textContent=title;header.append(th);}head.append(header);
+ for(const r of rows){const tr=document.createElement('tr');for(const value of [r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal??'—',pct(r.processShare,4),r.stageShare===null?'—':pct(r.stageShare,4),r.processGood,r.processFail,r.stageGood??'—',r.stageFail??'—']){const td=document.createElement('td');td.textContent=String(value);tr.append(td);}body.append(tr);}table.append(head,body);$('defectCompositionTable').replaceChildren(table);if(!rows.length)$('defectCompositionTable').textContent='主檔沒有 FAIL 紀錄。';
 }
