@@ -39,7 +39,13 @@ export async function inputTables(bytes,filename){
     return [{name:filename.replace(/\.csv$/i,''),raw,expanded:raw}];
   }
   if(!/\.xlsx$/i.test(filename))throw Error('請上傳 .xlsx 或 .csv 檔案。');
-  const book=new ExcelJS.Workbook();await book.xlsx.load(bytes,{ignoreNodes:['dataValidations','conditionalFormatting','drawing','extLst']});
+  const signature=new Uint8Array(bytes.buffer||bytes,bytes.byteOffset||0,Math.min(bytes.byteLength,8));
+  if(signature[0]!==0x50||signature[1]!==0x4b||signature[2]!==0x03||signature[3]!==0x04){
+    throw Error('檔案內容不是可讀的標準 XLSX。可能是加密、損毀或副檔名與格式不符；請在可正常開啟的 Excel 中重新另存為未加密的 .xlsx，再上傳。');
+  }
+  const book=new ExcelJS.Workbook();
+  try{await book.xlsx.load(bytes,{ignoreNodes:['dataValidations','conditionalFormatting','drawing','extLst']});}
+  catch{throw Error('無法讀取 XLSX 內容，檔案可能不完整或損毀。請在 Excel 中重新另存為 .xlsx，再上傳。');}
   return book.worksheets.map(sheet=>{
     let maxRow=0,maxCol=0;
     sheet.eachRow(row=>row.eachCell(cell=>{if(!cell.isMerged||cell.address===cell.master.address){if(cellText(cell)){maxRow=Math.max(maxRow,row.number);maxCol=Math.max(maxCol,cell.col);}}}));

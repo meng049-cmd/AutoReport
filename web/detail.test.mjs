@@ -47,3 +47,8 @@ test('small compressed workbook with 90000 data rows exports on a bounded call s
   execFileSync(process.execPath,['--stack-size=256','--input-type=module','-e',code,fixture],{cwd:process.cwd(),timeout:60000});
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('non-XLSX bytes named xlsx fail with an actionable format message before matching',async()=>{
+ await assert.rejects(matchFile({lookup(){throw Error('matching should not run');}},new Uint8Array([0x35,0xf4,0x48,0xaf,0xde,0x3e,0xe4,0xb9]),'DAF偏移和CG.xlsx'),/不是可讀的標準 XLSX/);
+});
