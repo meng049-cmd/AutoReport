@@ -1,7 +1,14 @@
 (function (root) {
   'use strict';
+  // A checksum prevents stale first-NG metadata from surviving manual Detail edits.
+  function ngChecksum(rows) {let hash=2166136261;for(const row of rows)for(const ch of JSON.stringify(row.slice(0,11))){hash=Math.imul(hash^ch.charCodeAt(0),16777619);}return (hash>>>0).toString(16);}
+  function ngRecord(row,value,statusColumn) {
+    const status=String(row[statusColumn]??'').trim().toUpperCase(),defect=statusColumn===7?'':String(row[7]??'').trim();
+    if(status!=='FAIL')return null;
+    return {serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
+  }
   class DetailMerger {
-    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; }
+    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); }
     add(book, filename) {
       const XLSX = this.XLSX;
       const names = book.SheetNames.filter(name => name.trim().toLowerCase() === 'detail');
@@ -14,6 +21,7 @@
         for (const title of ['產出時間', '狀態']) if (header.filter(value => value === title).length !== 1) throw new Error(`須包含唯一的「${title}」欄位。`);
         this.time = header.indexOf('產出時間'); this.status = header.indexOf('狀態');
       } else if (JSON.stringify(header) !== JSON.stringify(this.header)) throw new Error(`${filename}：Detail 欄位標題與順序不一致。`);
+      const localNG=new Map(),fileValues=[];
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         const process = String(row[0] ?? '').trim(), serial = String(row[4] ?? '').trim();
@@ -26,10 +34,24 @@
         const normalized = timestamp + (book.Workbook?.WBProps?.date1904 ? 1462 : 0);
         row[this.time] = normalized;
         const key = JSON.stringify([day, process, serial]);
+        const value={row,day,timestamp:normalized};fileValues.push(value);
+        const ng=ngRecord(row,value,this.status),first=localNG.get(serial);
+        if(ng&&(!first||ng.timestamp<first.timestamp))localNG.set(serial,ng);
         const old = this.rows.get(key);
         if (!old || (status === 'FAIL' && String(old.row[this.status]).trim().toUpperCase() !== 'FAIL')) this.rows.set(key, {row, day, timestamp: normalized});
         this.total++;
       }
+      // Preserve the earliest FAIL even when same-day merging kept another FAIL row.
+      let candidates=localNG;
+      try {
+        const validKeys=new Set(fileValues.map(v=>JSON.stringify([String(v.row[4]).trim(),v.day,String(v.row[0]).trim()])));
+        const saved=JSON.parse(book.Custprops?.AutoReportFirstNG||'null');
+        if(saved?.version===1&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)&&saved.records.length===localNG.size&&new Set(saved.records.map(r=>r?.serial)).size===localNG.size){
+          const valid=saved.records.every(r=>r&&typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&r.defect&&r.status==='FAIL'&&Number.isFinite(r.timestamp)&&typeof r.date==='string'&&localNG.has(r.serial)&&r.timestamp<=localNG.get(r.serial).timestamp&&validKeys.has(JSON.stringify([r.serial,r.date,r.process])));
+          if(valid)candidates=new Map(saved.records.map(r=>[r.serial,r]));
+        }
+      } catch { /* Unrelated or invalid metadata never changes the parsed Detail. */ }
+      for(const [serial,ng] of candidates){const first=this.firstNG.get(serial);if(!first||ng.timestamp<first.timestamp)this.firstNG.set(serial,ng);}
     }
     finish() {
       if (!this.rows.size) throw new Error('Detail 沒有可合併的資料。');
@@ -47,6 +69,7 @@
         if (cell) cell.z = 'yyyy-mm-dd hh:mm:ss';
       }
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Detail');
+      book.Custprops={AutoReportFirstNG:JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()]}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
       return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, start_date: first, end_date: last};
     }
   }

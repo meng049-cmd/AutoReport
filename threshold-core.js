@@ -10,8 +10,11 @@ function buildDefectComposition(merger){
   const process=root.canonicalProcess(row[0]),stage=stages[process]||'',defect=String(row[7]??'').trim()||'【未填不良項目】',key=JSON.stringify([process,defect]);
   processTotals.set(process,(processTotals.get(process)||0)+1);
   if(stage)stageTotals.set(stage,(stageTotals.get(stage)||0)+1);
-  if(status!=='FAIL')continue;
-  processFails.set(process,(processFails.get(process)||0)+1);if(stage)stageFails.set(stage,(stageFails.get(stage)||0)+1);
+  if(status==='FAIL'){processFails.set(process,(processFails.get(process)||0)+1);if(stage)stageFails.set(stage,(stageFails.get(stage)||0)+1);}
+ }
+ // Numerators use one globally earliest FAIL per PPID; denominators retain merged input counts.
+ for(const first of merger.firstNG.values()){
+  const process=root.canonicalProcess(first.process),stage=stages[process]||'',defect=first.defect,key=JSON.stringify([process,defect]);
   const item=items.get(key)||{process,stage,defect,count:0};item.count++;items.set(key,item);
  }
  return [...items.values()].map(r=>({...r,processGood:processTotals.get(r.process)-processFails.get(r.process),processFail:processFails.get(r.process),stageGood:r.stage?stageTotals.get(r.stage)-stageFails.get(r.stage):null,stageFail:r.stage?stageFails.get(r.stage):null,processTotal:processTotals.get(r.process),stageTotal:r.stage?stageTotals.get(r.stage):null,processShare:r.count/processTotals.get(r.process),stageShare:r.stage?r.count/stageTotals.get(r.stage):null})).sort((a,b)=>b.count-a.count||a.process.localeCompare(b.process)||a.defect.localeCompare(b.defect));
@@ -21,7 +24,10 @@ function buildThresholdAnalysis(merger,calculation,identities){
  for(const value of merger.rows.values()){
   const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),product=identity.id,day=value.day,process=root.canonicalProcess(row[0]);
   const add=(map,key)=>{const set=map.get(key)||new Set();set.add(serial);map.set(key,set);};add(dailyGlobal,day);add(dailyProducts,JSON.stringify([product,day]));
-  if(String(row[merger.status]).trim().toUpperCase()==='FAIL'){const key=JSON.stringify([product,day]);const list=failRows.get(key)||[];list.push({serial,process,defect:String(row[7]??'').trim()||'【未填不良項目】',time:value.timestamp});failRows.set(key,list);}
+ }
+ for(const first of merger.firstNG.values()){
+  const identity=identities.get(first.serial),key=JSON.stringify([identity.id,first.date]),list=failRows.get(key)||[];
+  list.push({serial:first.serial,process:root.canonicalProcess(first.process),defect:first.defect,time:first.timestamp});failRows.set(key,list);
  }
  const checks=calculation.stageChecks.map(c=>({...c,target:targets[c.stage],below:c.yield<targets[c.stage]-1e-12}));
  const countMap=new Map(calculation.dailyCounts.map(c=>[JSON.stringify([c.product,c.day,c.process]),c]));
@@ -38,11 +44,11 @@ function buildThresholdAnalysis(merger,calculation,identities){
 function appendThresholdSheet(XLSX,book,data){
  const rows=[['IC','機種','日期','未達標階段','目標良率','實際階段良率','未達差距','不良歸屬製程','不良項目','不良PPID數','該產品當日總PPID','全產品當日總PPID','不良比例（個體）','不良比例（全體）','該產品該製程GOOD片數','該產品該製程FAIL片數','該產品該製程總片數','該製程良率'],...data.rows.map(r=>[r.ic,r.model,r.date,r.stage,r.target,r.yield,r.target-r.yield,r.process,r.defect,r.count,r.productTotal,r.globalTotal,r.productRate,r.globalRate,r.processGood,r.processFail,r.processTotal,r.processYield])];
  const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of [4,5,6,12,13,17])sheet[XLSX.utils.encode_cell({r,c})].z=[12,13].includes(c)?'0.0000%':'0.00%';sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,'未達標分析');
- const composition=[['階段','歸屬製程','不良項目','不良項目總數（筆）','所屬製程投入數（GOOD＋FAIL）','所屬階段投入數（GOOD＋FAIL）','占製程投入數的不良比例','占階段投入數的不良比例','製程GOOD數','製程FAIL數','階段GOOD數','階段FAIL數'],...data.composition.map(r=>[r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal,r.processShare,r.stageShare,r.processGood,r.processFail,r.stageGood,r.stageFail])];
+ const composition=[['階段','歸屬製程','不良項目','首次NG不良片數（PPID）','所屬製程投入數（GOOD＋FAIL）','所屬階段投入數（GOOD＋FAIL）','占製程投入數的不良比例','占階段投入數的不良比例','製程GOOD數','製程FAIL數','階段GOOD數','階段FAIL數'],...data.composition.map(r=>[r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal,r.processShare,r.stageShare,r.processGood,r.processFail,r.stageGood,r.stageFail])];
  const compositionSheet=XLSX.utils.aoa_to_sheet(composition);
  for(let r=1;r<composition.length;r++)for(const c of [6,7]){const cell=compositionSheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.0000%';}
  compositionSheet['!cols']=composition[0].map(()=>({wch:28}));XLSX.utils.book_append_sheet(book,compositionSheet,'全產品不良項目占比');
- const notes=book.Sheets['統計說明'];XLSX.utils.sheet_add_aoa(notes,[['未達標目標','SMT≥99.5%、前段≥98%、後段≥99%；用未四捨五入的每日階段良率判斷；無資料不列未達標。'],['未達標比例分母','個體＝產品當日不重複PPID；全體＝全部產品當日不重複PPID。'],['全產品不良項目占比','以整份主檔的FAIL紀錄計數，不分IC、機種、日期，也不限制未達標資料；主檔已依日期＋製程＋PPID去重，FAIL優先。每筆H欄完整文字為一項，不拆分標點。跨製程或跨日期的同片FAIL各計一次，不套用每片單一不良歸屬。'],['製程不良項目比例','同製程＋不良項目的FAIL紀錄總數／該製程全部GOOD＋FAIL紀錄總數。各項比例加總為該製程FAIL／投入數。'],['階段不良項目比例','同製程＋不良項目的FAIL紀錄總數／所屬SMT、前段或後段所含製程的GOOD＋FAIL紀錄總數加總。各項比例加總為該階段FAIL／投入數；同片跨製程投入分別計數，非階段唯一PPID數，也非每日AGGREGATE良率。未定義階段的製程保留，階段分母與比例留白。'],['未達標歸屬','每個產品／日期／階段內，一片只歸屬該階段最早FAIL的製程＋不良項目；階段分開分析，不跨階段相加。'],['製程GOOD／FAIL','該產品該日期該製程的唯一PPID，FAIL優先；為整個製程片數，非單一不良項目片數。']],{origin:-1});
+ const notes=book.Sheets['統計說明'];XLSX.utils.sheet_add_aoa(notes,[['未達標目標','SMT≥99.5%、前段≥98%、後段≥99%；用未四捨五入的每日階段良率判斷；無資料不列未達標。'],['未達標比例分母','個體＝產品當日不重複PPID；全體＝全部產品當日不重複PPID。'],['全產品不良項目占比','NG 僅指 FAIL，GOOD 不計 NG。每個 PPID 只歸屬跨日期、跨製程時間最早的第一次 FAIL；H 欄完整文字為一項，未填則明確標示。不限制未達標資料；輸入先保留首次 NG，再依日期＋製程＋PPID合併，FAIL優先。'],['製程不良項目比例','首次NG歸屬此製程＋不良項目的唯一PPID數／該製程合併後全部GOOD＋FAIL紀錄總數。分子只計首次NG，不等於該製程所有FAIL紀錄。'],['階段不良項目比例','首次NG歸屬此製程＋項目的唯一PPID數／所屬階段的合併後GOOD＋FAIL紀錄總數。同片跨製程投入仍分別計數，但NG歸屬只計一次；此比例與每日AGGREGATE良率分開顯示。未歸類階段的比例留白。'],['未達標歸屬','先找每個PPID全期間第一次FAIL，再依該次日期／製程／階段列入未達標明細；後續重複FAIL不再歸屬，該日可能未達標但沒有新首次NG。每日良率仍為原始GOOD／(GOOD＋FAIL)。'],['製程GOOD／FAIL','該產品該日期該製程的唯一PPID，FAIL優先；為整個製程片數，非單一不良項目片數。']],{origin:-1});
 }
 root.buildThresholdAnalysis=buildThresholdAnalysis;root.appendThresholdSheet=appendThresholdSheet;
 })(typeof self!=='undefined'?self:globalThis);

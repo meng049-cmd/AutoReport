@@ -58,7 +58,7 @@ function buildYieldReport(merger,identities){
   stageRows.push([]);
  }
  const finish=(rows,cells)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);Object.assign(sheet,cells);sheet['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length-1,c:dates.length}});sheet['!cols']=[{wch:28},...dates.map(()=>({wch:16}))];return sheet;};
- const book=XLSX.utils.book_new();
+ const book=XLSX.utils.book_new();book.Custprops=merged.book.Custprops;
  XLSX.utils.book_append_sheet(book,finish(processRows,processSheet),'每日製程良率');
  XLSX.utils.book_append_sheet(book,finish(stageRows,stageSheet),'每日階段良率');
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
