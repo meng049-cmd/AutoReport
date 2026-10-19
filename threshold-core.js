@@ -4,15 +4,16 @@ const targets={SMT:.995,'前段':.98,'後段':.99};
 function buildDefectComposition(merger){
  const stages={正面AOI:'SMT',DAF外觀:'前段',DAF熱壓投入:'前段',功能一測試:'前段',功能二測試:'後段',外觀檢查點亮測試:'後段',輝度機測試:'後段'};
  const items=new Map(),processTotals=new Map(),stageTotals=new Map(),processFails=new Map(),stageFails=new Map();
- for(const {row} of merger.rows.values()){
+ for(const value of merger.rows.values()){
+  const row=value.row;
   const status=String(row[merger.status]).trim().toUpperCase();
   if(!['GOOD','FAIL'].includes(status))continue;
   const process=root.canonicalProcess(row[0]),stage=stages[process]||'',defect=String(row[7]??'').trim()||'【未填不良項目】',key=JSON.stringify([process,defect]);
   processTotals.set(process,(processTotals.get(process)||0)+1);
   if(stage)stageTotals.set(stage,(stageTotals.get(stage)||0)+1);
-  if(status==='FAIL'){processFails.set(process,(processFails.get(process)||0)+1);if(stage)stageFails.set(stage,(stageFails.get(stage)||0)+1);}
+  if(merger.hasDefect(value)){processFails.set(process,(processFails.get(process)||0)+1);if(stage)stageFails.set(stage,(stageFails.get(stage)||0)+1);}
  }
- // Numerators use one globally earliest FAIL per PPID; denominators retain merged input counts.
+ // Numerators use one first-encountered defect per PPID; denominators retain merged input counts.
  for(const first of merger.firstNG.values()){
   const process=root.canonicalProcess(first.process),stage=stages[process]||'',defect=first.defect,key=JSON.stringify([process,defect]);
   const item=items.get(key)||{process,stage,defect,count:0};item.count++;items.set(key,item);
@@ -42,13 +43,13 @@ function buildThresholdAnalysis(merger,calculation,identities){
  return {targets,checks,below:checks.filter(c=>c.below),rows,composition:buildDefectComposition(merger)};
 }
 function appendThresholdSheet(XLSX,book,data){
- const rows=[['IC','機種','日期','未達標階段','目標良率','實際階段良率','未達差距','不良歸屬製程','不良項目','不良PPID數','該產品當日總PPID','全產品當日總PPID','不良比例（個體）','不良比例（全體）','該產品該製程GOOD片數','該產品該製程FAIL片數','該產品該製程總片數','該製程良率'],...data.rows.map(r=>[r.ic,r.model,r.date,r.stage,r.target,r.yield,r.target-r.yield,r.process,r.defect,r.count,r.productTotal,r.globalTotal,r.productRate,r.globalRate,r.processGood,r.processFail,r.processTotal,r.processYield])];
+ const rows=[['IC','機種','日期','未達標階段','目標良率','實際階段良率','未達差距','不良歸屬製程','不良項目','不良PPID數','該產品當日總PPID','全產品當日總PPID','不良比例（個體）','不良比例（全體）','該產品該製程無不良項目片數','該產品該製程有不良項目片數','該產品該製程總片數','該製程良率'],...data.rows.map(r=>[r.ic,r.model,r.date,r.stage,r.target,r.yield,r.target-r.yield,r.process,r.defect,r.count,r.productTotal,r.globalTotal,r.productRate,r.globalRate,r.processGood,r.processFail,r.processTotal,r.processYield])];
  const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of [4,5,6,12,13,17])sheet[XLSX.utils.encode_cell({r,c})].z=[12,13].includes(c)?'0.0000%':'0.00%';sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,'未達標分析');
- const composition=[['階段','歸屬製程','不良項目','首次NG不良片數（PPID）','所屬製程投入數（GOOD＋FAIL）','所屬階段投入數（GOOD＋FAIL）','占製程投入數的不良比例','占階段投入數的不良比例','製程GOOD數','製程FAIL數','階段GOOD數','階段FAIL數'],...data.composition.map(r=>[r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal,r.processShare,r.stageShare,r.processGood,r.processFail,r.stageGood,r.stageFail])];
+ const composition=[['階段','歸屬製程','不良項目','首次NG不良片數（PPID）','所屬製程投入數（無不良項目＋有不良項目）','所屬階段投入數（無不良項目＋有不良項目）','占製程投入數的不良比例','占階段投入數的不良比例','製程無不良項目數','製程有不良項目數','階段無不良項目數','階段有不良項目數'],...data.composition.map(r=>[r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal,r.processShare,r.stageShare,r.processGood,r.processFail,r.stageGood,r.stageFail])];
  const compositionSheet=XLSX.utils.aoa_to_sheet(composition);
  for(let r=1;r<composition.length;r++)for(const c of [6,7]){const cell=compositionSheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.0000%';}
  compositionSheet['!cols']=composition[0].map(()=>({wch:28}));XLSX.utils.book_append_sheet(book,compositionSheet,'全產品不良項目占比');
- const notes=book.Sheets['統計說明'];XLSX.utils.sheet_add_aoa(notes,[['未達標目標','SMT≥99.5%、前段≥98%、後段≥99%；用未四捨五入的每日階段良率判斷；無資料不列未達標。'],['未達標比例分母','個體＝產品當日不重複PPID；全體＝全部產品當日不重複PPID。'],['全產品不良項目占比','NG 僅指 FAIL，GOOD 不計 NG。每個 PPID 只歸屬跨日期、跨製程時間最早的第一次 FAIL；H 欄完整文字為一項，未填則明確標示。不限制未達標資料；輸入先保留首次 NG，再依日期＋製程＋PPID合併，FAIL優先。'],['製程不良項目比例','首次NG歸屬此製程＋不良項目的唯一PPID數／該製程合併後全部GOOD＋FAIL紀錄總數。分子只計首次NG，不等於該製程所有FAIL紀錄。'],['階段不良項目比例','首次NG歸屬此製程＋項目的唯一PPID數／所屬階段的合併後GOOD＋FAIL紀錄總數。同片跨製程投入仍分別計數，但NG歸屬只計一次；此比例與每日AGGREGATE良率分開顯示。未歸類階段的比例留白。'],['未達標歸屬','先找每個PPID全期間第一次FAIL，再依該次日期／製程／階段列入未達標明細；後續重複FAIL不再歸屬，該日可能未達標但沒有新首次NG。每日良率仍為原始GOOD／(GOOD＋FAIL)。'],['製程GOOD／FAIL','該產品該日期該製程的唯一PPID，FAIL優先；為整個製程片數，非單一不良項目片數。']],{origin:-1});
+ const notes=book.Sheets['統計說明'];XLSX.utils.sheet_add_aoa(notes,[['未達標目標','SMT≥99.5%、前段≥98%、後段≥99%；用未四捨五入的每日階段良率判斷；無資料不列未達標。'],['未達標比例分母','個體＝產品當日不重複PPID；全體＝全部產品當日不重複PPID。'],['全產品不良項目占比','H 欄有不良項目即計入，包含 GOOD 與 FAIL；每個 PPID 跨日期、跨製程依輸入順序只取第一筆不良項目。H 欄空白不列不良。Detail 合併仍保留原始狀態與 FAIL 優先規則。'],['製程不良項目比例','首次不良項目歸屬此製程＋項目的唯一PPID數／該製程合併後總紀錄數，分子依輸入順序，不以狀態或時間重新挑選。'],['階段不良項目比例','首次NG歸屬此製程＋項目的唯一PPID數／所屬階段的合併後無不良項目＋有不良項目紀錄總數。同片跨製程投入仍分別計數，但NG歸屬只計一次；此比例與每日AGGREGATE良率分開顯示。未歸類階段的比例留白。'],['未達標歸屬','先依輸入順序找每個PPID第一筆不良項目，再按該筆日期／製程／階段列入明細；後續不再歸屬。每日良率＝無不良項目片數／總片數。'],['製程GOOD／FAIL','該產品該日期該製程的唯一PPID，依有無不良項目分類；原始GOOD／FAIL狀態保留在Detail，不直接當作良率分類。']],{origin:-1});
 }
 root.buildThresholdAnalysis=buildThresholdAnalysis;root.appendThresholdSheet=appendThresholdSheet;
 })(typeof self!=='undefined'?self:globalThis);
