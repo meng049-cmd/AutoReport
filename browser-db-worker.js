@@ -11,6 +11,16 @@ async function initialize(){
 }
 self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({id,error:'請使用支援本地資料庫更新的最新版 Chrome／Edge。'});return;}navigator.locks.request('AutoReport-local-database',async()=>{try{
  let state=await readBrowserDatabase();
+ if(type==='clear'){
+  self.postMessage({id,progress:'正在清空本瀏覽器資料庫…'});
+  const py=await initialize();const path='/app/data/cleared.sqlite3';
+  if(py.FS.analyzePath(path).exists)py.FS.unlink(path);
+  const stats=JSON.parse(await py.runPythonAsync("import json\nwith autoreport.connect('/app/data/cleared.sqlite3') as db:\n    db.commit()\n    assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'\n    stats=autoreport.stats(db)\njson.dumps(stats,ensure_ascii=False)"));
+  const reference={stats,records:[],keys:[],uploaded_files:[],source_files:[],database_update:null};
+  const database=py.FS.readFile(path).slice().buffer;
+  await saveBrowserDatabase({version:1,database,reference});
+  py.FS.unlink(path);self.postMessage({id,result:{reference}});return;
+ }
  if(type==='download'){const bytes=state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3');self.postMessage({id,result:bytes.buffer},[bytes.buffer]);return;}
  if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>20*1024*1024)throw Error('請選擇一份 20 MB 以內的 .xlsx 原始對照檔。');
  self.postMessage({id,progress:'首次更新正在載入本地運算工具，請稍候…'});const py=await initialize();
