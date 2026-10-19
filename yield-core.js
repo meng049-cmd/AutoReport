@@ -21,10 +21,10 @@ function buildYieldReport(merger,identities){
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
  const stageChecks=[];
- const merged=merger.finish(),dates=[];
+ const merged=merger.finish({dense:true}),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
- const details=[['日期','IC','機種','製程','無不良項目數量','有不良項目數量','總數','良率','不良率']],indices=new Map();
+ const details=[['日期','IC','機種','製程','良品數量','不良數量','總數','良率','不良率']],indices=new Map();
  const entries=[...counts.entries()].sort((a,b)=>a[1].day.localeCompare(b[1].day)||a[1].ic.localeCompare(b[1].ic)||a[1].model.localeCompare(b[1].model)||a[1].process.localeCompare(b[1].process));
  for(const [key,c] of entries){indices.set(key,details.length+1);details.push([c.day,c.ic,c.model,c.process,c.good,c.fail,c.good+c.fail,c.good/(c.good+c.fail),c.fail/(c.good+c.fail)]);}
  const detailSheet=XLSX.utils.aoa_to_sheet(details);

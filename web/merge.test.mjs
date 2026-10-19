@@ -40,3 +40,10 @@ test('reject missing Detail, invalid dates and inconsistent headers',()=>{
   const merger=new DetailMerger(XLSX);merger.add(book([row('A',5,'GOOD')]),'first.xlsx');
   assert.throws(()=>merger.add(book([row('A',5,'GOOD')],header.concat('extra')),'second.xlsx'),/不一致/);
 });
+
+test('daily report reader parses only Detail and retains metadata without unrelated sheet data',()=>{
+ const input=book([row('A',5,'FAIL','bad')]);XLSX.utils.book_append_sheet(input,XLSX.utils.aoa_to_sheet([['other'],['not a detail row']]),'OldReport');
+ const bytes=XLSX.write(input,{type:'array',bookType:'xlsx'}),selected=DetailMerger.readBook(XLSX,bytes);
+ assert.ok(selected.Sheets.Detail);assert.equal(selected.Sheets.OldReport,undefined);
+ const m=new DetailMerger(XLSX);m.add(selected,'master.xlsx');assert.equal(m.finish().output_rows,1);
+});

@@ -86,7 +86,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   const qualityDetail=qualityFixture.getWorksheet('Detail');qualityDetail.getCell('H2').value='第一筆不良項目';qualityDetail.getCell('I2').value='GOOD';
   const otherFailure=qualityDetail.getRow(2).values.slice(1);otherFailure[0]='第二製程';otherFailure[5]=new Date('2026-10-12');otherFailure[7]='其他不良';otherFailure[8]='FAIL';qualityDetail.addRow(otherFailure);
   const earlierGood=qualityDetail.getRow(2).values.slice(1);earlierGood[0]='正面AOI';earlierGood[5]=new Date('2026-10-10');earlierGood[7]='後續GOOD不良項目';earlierGood[8]='GOOD';qualityDetail.addRow(earlierGood);
-  // The daily merge keeps FAIL, while analysis keeps the first GOOD defect by input order.
+  // The daily merge and attribution both prioritize FAIL; the first FAIL in input wins, not the earliest timestamp.
   qualityDetail.getCell('F2').value=new Date('2026-10-11T12:00:00Z');qualityDetail.getCell('H2').value='第一筆不良項目';
   const earlierFail=qualityDetail.getRow(2).values.slice(1);earlierFail[5]=new Date('2026-10-11T01:00:00Z');earlierFail[7]='時間較早但後出現';earlierFail[8]='FAIL';qualityDetail.addRow(earlierFail);
   const goodUnit=qualityDetail.getRow(2).values.slice(1);goodUnit[4]='second-unit';goodUnit[7]=null;goodUnit[8]='GOOD';qualityDetail.addRow(goodUnit);
@@ -99,19 +99,19 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('B2').value,2);
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('F2').value,.5);
   assert.equal(qualityOutput.getWorksheet('全產品不良排名').rowCount,2);
-  assert.equal(qualityOutput.getWorksheet('全產品不良排名').getCell('C2').value,'第一筆不良項目');
-  assert.equal(qualityOutput.getWorksheet('不良歸屬明細').getCell('I2').value,'GOOD');
+  assert.equal(qualityOutput.getWorksheet('全產品不良排名').getCell('C2').value,'其他不良');
+  assert.equal(qualityOutput.getWorksheet('不良歸屬明細').getCell('I2').value,'FAIL');
   assert.equal(qualityOutput.getWorksheet('全產品不良項目占比').rowCount,2);
   assert.equal(qualityOutput.getWorksheet('全產品不良項目占比').getCell('D2').value,1);assert.equal(qualityOutput.getWorksheet('計算明細').getCell('I1').value,'不良率');
   await page.locator('#yieldFile').setInputFiles({name:'downloaded-master.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile(await qualityDownload.path())});
   await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
   const [reanalysis]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
-  const reloaded=new ExcelJS.Workbook();await reloaded.xlsx.readFile(await reanalysis.path());assert.equal(reloaded.getWorksheet('全產品不良排名').getCell('C2').value,'第一筆不良項目');
+  const reloaded=new ExcelJS.Workbook();await reloaded.xlsx.readFile(await reanalysis.path());assert.equal(reloaded.getWorksheet('全產品不良排名').getCell('C2').value,'其他不良');
   assert.equal(await page.locator('#thresholdDashboard').isVisible(),true);
   assert.ok(qualityOutput.getWorksheet('未達標分析'));
   await page.locator('#qualityGlobalChart button').first().click();
-  assert.match(await page.locator('#qualitySelection').innerText(),/第一筆不良項目/);
-  assert.match(await page.locator('#qualityLinkedDetails').innerText(),/第一筆不良項目/);
+  assert.match(await page.locator('#qualitySelection').innerText(),/其他不良/);
+  assert.match(await page.locator('#qualityLinkedDetails').innerText(),/其他不良/);
   assert.equal(await page.locator('#qualityLinkedPPID tbody tr').count(),1);
   await page.locator('#qualityProductChart button').first().click();assert.notEqual(await page.locator('#qualityProduct').inputValue(),'');
   assert.ok(await page.locator('#qualityGlobalChart button').count()<=5);assert.ok(await page.locator('#qualityChart button').count()<=5);

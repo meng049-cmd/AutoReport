@@ -43,8 +43,8 @@ test('later-day FAIL still affects daily yield but is never attributed a second 
  const later=report.calculation.dailyCounts.find(c=>c.day==='2026-10-06');assert.equal(later.fail,1);assert.equal(later.good,0);
 });
 
-test('GOOD defects enter first-defect rankings, below-target analysis and bad rates',()=>{
+test('FAIL takes priority in attribution while GOOD defects still lower daily yield',()=>{
  const {quality,report,result}=run([row('a','DAF外觀','GOOD','first defect'),row('a','功能一測試','FAIL','later defect',6),row('b','DAF外觀','GOOD',null)]);
- assert.equal(quality.fail,1);assert.equal(quality.attribution[0].status,'GOOD');assert.equal(result.composition[0].defect,'first defect');assert.equal(result.composition.length,1);
- assert.equal(report.calculation.dailyCounts.find(r=>r.day==='2026-10-05').fail,1);assert.equal(result.rows[0].defect,'first defect');assert.equal(result.rows[0].yield,.5);
+ assert.equal(quality.fail,1);assert.equal(quality.attribution[0].status,'FAIL');assert.equal(result.composition[0].defect,'later defect');assert.equal(result.composition.length,1);
+ assert.equal(report.calculation.dailyCounts.find(r=>r.day==='2026-10-05').fail,1);assert.equal(result.rows[0].defect,'later defect');assert.equal(result.rows[0].yield,0);
 });

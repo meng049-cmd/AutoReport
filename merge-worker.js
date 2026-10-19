@@ -6,7 +6,7 @@ self.onmessage = async ({data: files}) => {
     for (let i = 0; i < files.length; i++) {
       self.postMessage({type: 'progress', message: `正在讀取 ${i + 1}/${files.length}：${files[i].name}`});
       const bytes = await files[i].arrayBuffer();
-      merger.add(XLSX.read(bytes, {type:'array', dense:true}), files[i].name);
+      merger.add(DetailMerger.readBook(XLSX,bytes), files[i].name);
     }
     self.postMessage({type:'progress', message:'正在排序、產生下載檔案…'});
     const {book, ...stats} = merger.finish();

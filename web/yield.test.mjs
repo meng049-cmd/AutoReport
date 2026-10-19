@@ -17,9 +17,9 @@ test('per-product daily yields and arithmetic stage averages, including FAIL-fir
 });
 test('missing product remains explicitly pending, with original rows preserved',()=>{const r=row('正面AOI','GOOD','a');r[9]='';const result=report([r]);assert.equal(result.missing_product_rows,1);assert.equal(result.product_count,0);assert.equal(result.pending_product_count,1);assert.equal(result.book.Sheets['每日製程良率'].A2.v,'【待補 IC】');assert.ok(result.book.Sheets['待補產品資料']);});
 
-test('daily yield classifies defect text instead of status and preserves discarded GOOD evidence',()=>{
+test('daily yield counts both FAIL and GOOD defect records, without duplicating same-day PPIDs',()=>{
  const a=row('正面AOI','GOOD','a');a[7]='CG內異物';const b=row('正面AOI','FAIL','b');b[7]=null;
  const replacement=row('正面AOI','FAIL','a');replacement[7]=null;
- const r=report([a,replacement,b]);assert.equal(r.output_rows,2);assert.equal(r.calculation.dailyCounts[0].fail,1);assert.equal(r.calculation.dailyCounts[0].good,1);assert.equal(r.book.Sheets['計算明細'].H2.v,.5);assert.equal(r.book.Sheets['計算明細'].I2.v,.5);assert.equal(r.book.Sheets['計算明細'].I2.f,'F2/(E2+F2)');
- const again=XLSX.read(XLSX.write(r.book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),m=new DetailMerger(XLSX);m.add(again,'report.xlsx');assert.equal(buildYieldReport(m).book.Sheets['計算明細'].H2.v,.5);
+ const r=report([a,replacement,b]);assert.equal(r.output_rows,2);assert.equal(r.calculation.dailyCounts[0].fail,2);assert.equal(r.calculation.dailyCounts[0].good,0);assert.equal(r.book.Sheets['計算明細'].H2.v,0);assert.equal(r.book.Sheets['計算明細'].I2.v,1);assert.equal(r.book.Sheets['計算明細'].I2.f,'F2/(E2+F2)');
+ const again=XLSX.read(XLSX.write(r.book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),m=new DetailMerger(XLSX);m.add(again,'report.xlsx');assert.equal(buildYieldReport(m).book.Sheets['計算明細'].H2.v,0);
 });
