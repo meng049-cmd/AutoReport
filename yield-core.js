@@ -16,7 +16,7 @@ function buildYieldReport(merger,identities){
   const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
   products.set(product,{ic:ic||'【待補 IC】',model:model||'【待補機種】',incomplete});processes.add(process);
   const count=counts.get(key)||{product,ic,model,day:value.day,process,good:0,fail:0,units:new Map()};
-  const serial=String(row[4]).trim();count.units.set(serial,Boolean(count.units.get(serial)||String(row[merger.status]).trim().toUpperCase()==='FAIL'));
+  const serial=String(row[4]).trim();count.units.set(serial,Boolean(count.units.get(serial)||merger.hasDefect(value)));
   counts.set(key,count);
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
@@ -24,12 +24,12 @@ function buildYieldReport(merger,identities){
  const merged=merger.finish(),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
- const details=[['日期','IC','機種','製程','GOOD數量','FAIL數量','總數','良率']],indices=new Map();
+ const details=[['日期','IC','機種','製程','無不良項目數量','有不良項目數量','總數','良率','不良率']],indices=new Map();
  const entries=[...counts.entries()].sort((a,b)=>a[1].day.localeCompare(b[1].day)||a[1].ic.localeCompare(b[1].ic)||a[1].model.localeCompare(b[1].model)||a[1].process.localeCompare(b[1].process));
- for(const [key,c] of entries){indices.set(key,details.length+1);details.push([c.day,c.ic,c.model,c.process,c.good,c.fail,c.good+c.fail,c.good/(c.good+c.fail)]);}
+ for(const [key,c] of entries){indices.set(key,details.length+1);details.push([c.day,c.ic,c.model,c.process,c.good,c.fail,c.good+c.fail,c.good/(c.good+c.fail),c.fail/(c.good+c.fail)]);}
  const detailSheet=XLSX.utils.aoa_to_sheet(details);
- for(let r=2;r<=details.length;r++)detailSheet['H'+r]={t:'n',v:details[r-1][7],f:`E${r}/(E${r}+F${r})`,z:'0.00%'};
- detailSheet['!cols']=[{wch:14},{wch:20},{wch:20},{wch:26},...Array.from({length:4},()=>({wch:16}))];
+ for(let r=2;r<=details.length;r++){detailSheet['H'+r]={t:'n',v:details[r-1][7],f:`E${r}/(E${r}+F${r})`,z:'0.00%'};detailSheet['I'+r]={t:'n',v:details[r-1][8],f:`F${r}/(E${r}+F${r})`,z:'0.00%'};}
+ detailSheet['!cols']=[{wch:14},{wch:20},{wch:20},{wch:26},...Array.from({length:5},()=>({wch:16}))];
  const processRows=[],stageRows=[],processSheet={},stageSheet={};
  const order=[...preferred,...[...processes].filter(p=>!preferred.includes(p)).sort()];
  const productList=[...products.entries()].sort((a,b)=>a[1].model.localeCompare(b[1].model)||a[1].ic.localeCompare(b[1].ic));

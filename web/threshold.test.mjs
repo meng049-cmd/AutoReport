@@ -14,12 +14,12 @@ test('threshold equality passes and absent stages are never flagged',()=>{
  const checks=[{product:quality.products[0].id,ic:'Goodix',model:'Model',date:'2026-10-05',stage:'SMT',yield:.995,processes:['正面AOI']},{product:quality.products[0].id,stage:'前段',yield:.98,processes:[]},{product:quality.products[0].id,stage:'後段',yield:.99,processes:[]}];
  assert.equal(buildThresholdAnalysis(merger,{...report.calculation,stageChecks:checks},quality.identities).below.length,0);assert.equal(report.calculation.stageChecks.length,1);
 });
-test('all-product composition assigns only the first FAIL per PPID and preserves GOOD plus FAIL denominators',()=>{
+test('all-product composition assigns only the first defect per PPID and preserves GOOD plus FAIL denominators',()=>{
  const {quality,report,result}=run([
   row('a','DAF外觀','FAIL','偏移'),row('a','功能一測試','FAIL','功能不良'),
   row('b','DAF外觀檢查','FAIL','偏移',5,'Elan'),row('a','DAF外觀','FAIL','偏移',6),
   row('c','DAF外觀','FAIL','其他'),row('c','DAF外觀','GOOD',null),
-  row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL',null),row('f','DAF外觀','GOOD',null),row('g','功能一測試','GOOD',null)
+  row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL','背面缺陷'),row('f','DAF外觀','GOOD',null),row('g','功能一測試','GOOD',null)
  ]);
  const offset=result.composition.find(r=>r.defect==='偏移'),functional=result.composition.find(r=>r.defect==='功能不良');
  assert.equal(offset.count,2);assert.equal(offset.processTotal,5);assert.equal(offset.stageTotal,7);assert.equal(offset.processGood,1);assert.equal(offset.processFail,4);assert.equal(offset.stageGood,2);assert.equal(offset.stageFail,5);assert.equal(offset.processShare,2/5);assert.equal(offset.stageShare,2/7);assert.equal(functional,undefined);
@@ -37,8 +37,14 @@ test('empty FAIL composition exports headers without dividing by zero',()=>{
 });
 
 test('later-day FAIL still affects daily yield but is never attributed a second time',()=>{
- const {quality,report,result}=run([row('a','DAF外觀','FAIL','first'),row('a','功能一測試','FAIL','later',6),row('b','DAF外觀','GOOD','text on GOOD')]);
+ const {quality,report,result}=run([row('a','DAF外觀','FAIL','first'),row('a','功能一測試','FAIL','later',6),row('b','DAF外觀','GOOD',null)]);
  assert.equal(quality.fail,1);assert.equal(result.composition.length,1);assert.equal(result.composition[0].defect,'first');assert.equal(result.composition[0].count,1);
  assert.equal(result.below.length,2);assert.equal(result.rows.length,1);assert.equal(result.rows[0].date,'2026-10-05');assert.equal(result.rows[0].defect,'first');
  const later=report.calculation.dailyCounts.find(c=>c.day==='2026-10-06');assert.equal(later.fail,1);assert.equal(later.good,0);
+});
+
+test('GOOD defects enter first-defect rankings, below-target analysis and bad rates',()=>{
+ const {quality,report,result}=run([row('a','DAF外觀','GOOD','first defect'),row('a','功能一測試','FAIL','later defect',6),row('b','DAF外觀','GOOD',null)]);
+ assert.equal(quality.fail,1);assert.equal(quality.attribution[0].status,'GOOD');assert.equal(result.composition[0].defect,'first defect');assert.equal(result.composition.length,1);
+ assert.equal(report.calculation.dailyCounts.find(r=>r.day==='2026-10-05').fail,1);assert.equal(result.rows[0].defect,'first defect');assert.equal(result.rows[0].yield,.5);
 });
