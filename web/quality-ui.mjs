@@ -39,7 +39,7 @@ function render(){
  const matched=a.products.filter(p=>!product||p.id===product.id).flatMap(p=>p.defects.filter(d=>(!selectedProcess||d.process===selectedProcess)&&(!selectedDefect||d.defect===selectedDefect)).map(d=>{const process=a.productProcesses.find(v=>v.product===p.id&&v.process===d.process);return [p.ic,p.model,d.process,d.defect,d.count,p.total,percent(d.rate),percent(d.count/a.total),process?.good||0,process?.fail||0];}));
  table('qualityLinkedDetails',['IC','機種','製程','不良項目','歸屬不良片數','產品總片數','產品內比例','占全體比例','製程GOOD片','製程FAIL片'],matched);
  const attributed=a.attribution.filter(r=>(!product||(r.ic===product.ic&&r.model===product.model))&&(!selectedProcess||r.process===selectedProcess)&&(!selectedDefect||r.defect===selectedDefect));
- table('qualityLinkedPPID',['IC','機種','PPID','首次FAIL日期','歸屬製程','不良項目'],attributed.slice(0,100).map(r=>[r.ic,r.model,r.serial,r.date,r.process,r.defect]));
+ table('qualityLinkedPPID',['IC','機種','PPID','首次NG日期','歸屬製程','不良項目'],attributed.slice(0,100).map(r=>[r.ic,r.model,r.serial,r.date,r.process,r.defect]));
  $('qualityLinkedCount').textContent=`符合 ${attributed.length.toLocaleString()} 片，顯示前 100 片，完整明細可下載 Excel。`;
 
 }

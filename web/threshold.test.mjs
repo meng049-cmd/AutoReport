@@ -14,7 +14,7 @@ test('threshold equality passes and absent stages are never flagged',()=>{
  const checks=[{product:quality.products[0].id,ic:'Goodix',model:'Model',date:'2026-10-05',stage:'SMT',yield:.995,processes:['正面AOI']},{product:quality.products[0].id,stage:'前段',yield:.98,processes:[]},{product:quality.products[0].id,stage:'後段',yield:.99,processes:[]}];
  assert.equal(buildThresholdAnalysis(merger,{...report.calculation,stageChecks:checks},quality.identities).below.length,0);assert.equal(report.calculation.stageChecks.length,1);
 });
-test('all-product composition counts all FAIL records across products and dates, with no first-failure attribution',()=>{
+test('all-product composition assigns only the first FAIL per PPID and preserves GOOD plus FAIL denominators',()=>{
  const {quality,report,result}=run([
   row('a','DAF外觀','FAIL','偏移'),row('a','功能一測試','FAIL','功能不良'),
   row('b','DAF外觀檢查','FAIL','偏移',5,'Elan'),row('a','DAF外觀','FAIL','偏移',6),
@@ -22,16 +22,23 @@ test('all-product composition counts all FAIL records across products and dates,
   row('d','正面AOI','FAIL','AOI'),row('e','背面AOI','FAIL',null),row('f','DAF外觀','GOOD',null),row('g','功能一測試','GOOD',null)
  ]);
  const offset=result.composition.find(r=>r.defect==='偏移'),functional=result.composition.find(r=>r.defect==='功能不良');
- assert.equal(offset.count,3);assert.equal(offset.processTotal,5);assert.equal(offset.stageTotal,7);assert.equal(offset.processGood,1);assert.equal(offset.processFail,4);assert.equal(offset.stageGood,2);assert.equal(offset.stageFail,5);assert.equal(offset.processShare,3/5);assert.equal(offset.stageShare,3/7);assert.equal(functional.count,1);
- assert.ok(Math.abs(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0)-5/7)<1e-12);
- assert.equal(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0),4/5);
- assert.equal(result.composition.reduce((n,r)=>n+r.count,0),7);
+ assert.equal(offset.count,2);assert.equal(offset.processTotal,5);assert.equal(offset.stageTotal,7);assert.equal(offset.processGood,1);assert.equal(offset.processFail,4);assert.equal(offset.stageGood,2);assert.equal(offset.stageFail,5);assert.equal(offset.processShare,2/5);assert.equal(offset.stageShare,2/7);assert.equal(functional,undefined);
+ assert.ok(Math.abs(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0)-3/7)<1e-12);
+ assert.ok(Math.abs(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0)-3/5)<1e-12);
+ assert.equal(result.composition.reduce((n,r)=>n+r.count,0),5);
  const unknown=result.composition.find(r=>r.process==='背面AOI');assert.equal(unknown.stageShare,null);assert.equal(unknown.processShare,1);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
  const sheet=report.book.Sheets['全產品不良項目占比'],index=result.composition.indexOf(offset)+2;
- assert.equal(sheet['D'+index].v,3);assert.equal(sheet['G'+index].v,3/5);assert.equal(sheet['H'+index].v,3/7);assert.equal(sheet['H'+index].z,'0.0000%');
+ assert.equal(sheet['D'+index].v,2);assert.equal(sheet['G'+index].v,2/5);assert.equal(sheet['H'+index].v,2/7);assert.equal(sheet['H'+index].z,'0.0000%');
 });
 test('empty FAIL composition exports headers without dividing by zero',()=>{
  const {quality,report,result}=run([row('a','正面AOI','GOOD',null)]);assert.equal(result.composition.length,0);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);assert.equal(report.book.Sheets['全產品不良項目占比']['!ref'],'A1:L1');
+});
+
+test('later-day FAIL still affects daily yield but is never attributed a second time',()=>{
+ const {quality,report,result}=run([row('a','DAF外觀','FAIL','first'),row('a','功能一測試','FAIL','later',6),row('b','DAF外觀','GOOD','text on GOOD')]);
+ assert.equal(quality.fail,1);assert.equal(result.composition.length,1);assert.equal(result.composition[0].defect,'first');assert.equal(result.composition[0].count,1);
+ assert.equal(result.below.length,2);assert.equal(result.rows.length,1);assert.equal(result.rows[0].date,'2026-10-05');assert.equal(result.rows[0].defect,'first');
+ const later=report.calculation.dailyCounts.find(c=>c.day==='2026-10-06');assert.equal(later.fail,1);assert.equal(later.good,0);
 });
