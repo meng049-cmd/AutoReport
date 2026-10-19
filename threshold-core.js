@@ -32,19 +32,36 @@ function buildThresholdAnalysis(merger,calculation,identities){
  }
  const checks=calculation.stageChecks.map(c=>({...c,target:targets[c.stage],below:c.yield<targets[c.stage]-1e-12}));
  const countMap=new Map(calculation.dailyCounts.map(c=>[JSON.stringify([c.product,c.day,c.process]),c]));
- const rows=[];
+ const rows=[],observations=[];
  for(const check of checks.filter(c=>c.below)){
   const key=JSON.stringify([check.product,check.date]),primary=new Map();
   for(const row of failRows.get(key)||[])if(check.processes.includes(row.process)){const old=primary.get(row.serial);if(!old||row.time<old.time)primary.set(row.serial,row);}
   const defects=new Map();for(const row of primary.values()){const key=JSON.stringify([row.process,row.defect]);const d=defects.get(key)||{process:row.process,defect:row.defect,count:0};d.count++;defects.set(key,d);}
+  // Keep the daily view complete even when a PPID's cross-day/process first-NG
+  // attribution belongs elsewhere. These observations never add to attributed counts.
+  const observed=new Map();
+  for(const value of merger.rows.values()){
+   if(value.day!==check.date)continue;
+   const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),process=root.canonicalProcess(row[0]);
+   if(identity?.id!==check.product||!check.processes.includes(process)||!merger.hasDefect(value))continue;
+   const defect=String(row[7]??'').trim()||'【未填不良項目】',groupKey=JSON.stringify([process,defect]);
+   const item=observed.get(groupKey)||{...check,process,defect,observedSerials:new Set(),attributedSerials:new Set()};
+   item.observedSerials.add(serial);
+   const assigned=merger.firstNG.get(serial);
+   if(assigned&&assigned.date===value.day&&root.canonicalProcess(assigned.process)===process&&assigned.defect===defect)item.attributedSerials.add(serial);
+   observed.set(groupKey,item);
+  }
+  for(const item of observed.values())observations.push({...item,observedCount:item.observedSerials.size,attributedCount:item.attributedSerials.size,observedSerials:undefined,attributedSerials:undefined});
   const productTotal=dailyProducts.get(key)?.size||0,globalTotal=dailyGlobal.get(check.date)?.size||0;
   for(const d of [...defects.values()].sort((a,b)=>b.count-a.count||a.process.localeCompare(b.process)||a.defect.localeCompare(b.defect))){const c=countMap.get(JSON.stringify([check.product,check.date,d.process]));rows.push({...check,...d,productTotal,globalTotal,productRate:d.count/productTotal,globalRate:d.count/globalTotal,processGood:c.good,processFail:c.fail,processTotal:c.good+c.fail,processYield:c.good/(c.good+c.fail)});}
  }
- return {targets,checks,below:checks.filter(c=>c.below),rows,composition:buildDefectComposition(merger)};
+ return {targets,checks,below:checks.filter(c=>c.below),rows,observations,composition:buildDefectComposition(merger)};
 }
 function appendThresholdSheet(XLSX,book,data){
  const rows=[['IC','機種','日期','未達標階段','目標良率','實際階段良率','未達差距','不良歸屬製程','不良項目','不良PPID數','該產品當日總PPID','全產品當日總PPID','不良比例（個體）','不良比例（全體）','該產品該製程良品片數','該產品該製程不良片數','該產品該製程總片數','該製程良率'],...data.rows.map(r=>[r.ic,r.model,r.date,r.stage,r.target,r.yield,r.target-r.yield,r.process,r.defect,r.count,r.productTotal,r.globalTotal,r.productRate,r.globalRate,r.processGood,r.processFail,r.processTotal,r.processYield])];
  const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of [4,5,6,12,13,17])sheet[XLSX.utils.encode_cell({r,c})].z=[12,13].includes(c)?'0.0000%':'0.00%';sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,'未達標分析');
+ const observations=[['IC','機種','日期','未達標階段','製程','不良項目','當日觀察PPID數','計入全檔首次NG PPID數'],...data.observations.map(r=>[r.ic,r.model,r.date,r.stage,r.process,r.defect,r.observedCount,r.attributedCount])];
+ const observationSheet=XLSX.utils.aoa_to_sheet(observations);observationSheet['!cols']=observations[0].map(()=>({wch:26}));XLSX.utils.book_append_sheet(book,observationSheet,'未達標不良項目觀察');
  const composition=[['階段','歸屬製程','不良項目','首次NG不良片數（PPID）','所屬製程投入數（良品＋不良）','所屬階段投入數（良品＋不良）','占製程投入數的不良比例','占階段投入數的不良比例','製程良品數','製程不良數','階段良品數','階段不良數'],...data.composition.map(r=>[r.stage||'未歸類',r.process,r.defect,r.count,r.processTotal,r.stageTotal,r.processShare,r.stageShare,r.processGood,r.processFail,r.stageGood,r.stageFail])];
  const compositionSheet=XLSX.utils.aoa_to_sheet(composition);
  for(let r=1;r<composition.length;r++)for(const c of [6,7]){const cell=compositionSheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.0000%';}

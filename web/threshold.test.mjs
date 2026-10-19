@@ -40,6 +40,7 @@ test('later-day FAIL still affects daily yield but is never attributed a second 
  const {quality,report,result}=run([row('a','DAF外觀','FAIL','first'),row('a','功能一測試','FAIL','later',6),row('b','DAF外觀','GOOD',null)]);
  assert.equal(quality.fail,1);assert.equal(result.composition.length,1);assert.equal(result.composition[0].defect,'first');assert.equal(result.composition[0].count,1);
  assert.equal(result.below.length,2);assert.equal(result.rows.length,1);assert.equal(result.rows[0].date,'2026-10-05');assert.equal(result.rows[0].defect,'first');
+ const laterObservation=result.observations.find(r=>r.date==='2026-10-06');assert.equal(laterObservation.defect,'later');assert.equal(laterObservation.observedCount,1);assert.equal(laterObservation.attributedCount,0);
  const later=report.calculation.dailyCounts.find(c=>c.day==='2026-10-06');assert.equal(later.fail,1);assert.equal(later.good,0);
 });
 
