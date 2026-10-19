@@ -8,7 +8,7 @@ self.onmessage=async({data:{id,type,payload}})=>{
     await ready;let result;
     if(type==='refresh'){const local=await readBrowserDatabase();const reference=local?.reference||await(await fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'})).json();matcher=new Matcher(reference);lastResult=null;result=true;}
     else if(type==='reload'){matcher=new Matcher(payload.reference);lastResult=null;result=true;}
-    else if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
+    else if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,cleared_at:matcher.data.cleared_at,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
     else if(type==='match'){lastResult=null;lastResult=await matchFile(matcher,payload.bytes,payload.filename);const {detailBytes,...summary}=lastResult;result={...summary,detail:Boolean(detailBytes)};}

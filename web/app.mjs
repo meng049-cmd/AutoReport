@@ -70,14 +70,16 @@ function renderUploadedFiles(){
  const query=$('uploadedFileFilter').value.trim().normalize('NFKC').toLowerCase();
  const known=new Set(uploadedFiles.map(f=>f.name));
  const rows=[...uploadedFiles.map(f=>({...f,kind:'本瀏覽器匯入'})),...sourceFiles.filter(name=>!known.has(name)).map(name=>({name,kind:'既有資料庫來源'}))];
+ if(!rows.length){$('uploadedFiles').replaceChildren();return;}
  const filtered=rows.filter(f=>f.name.normalize('NFKC').toLowerCase().includes(query));
  const exact=query&&rows.some(f=>f.name.normalize('NFKC').toLowerCase()===query);
  $('uploadedFiles').innerHTML=(exact?'<p class="warn">已有同名檔案，請確認後再上傳；若要保留兩份檔案，請先改名。</p>':'')+table(['檔名','狀態','大小','查看'],filtered.map(f=>[esc(f.name),esc(f.kind),f.size==null?'—':esc((f.size/1024).toFixed(1)+' KB'),f.path?'<a target="_blank" rel="noopener noreferrer" href="https://github.com/meng049-cmd/AutoReport/blob/codex/autoreport-database/'+f.path.split('/').map(encodeURIComponent).join('/')+'">查看檔案</a>':'—']))+(!filtered.length?'<p>沒有符合的檔名。</p>':'');
 }
-async function refreshUploadedFiles(){if(!filesReady)return;const s=await call('stats');uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];renderUploadedFiles();$('uploadedFilesStatus').textContent='本瀏覽器匯入清單：'+uploadedFiles.length+' 份 Excel。';}
+function renderUploadedFilesStatus(){$('uploadedFilesStatus').textContent=uploadedFiles.length?'本瀏覽器匯入清單：'+uploadedFiles.length+' 份 Excel。':'尚無匯入資料。';}
+async function refreshUploadedFiles(){if(!filesReady)return;await call('refresh');applyDatabaseStats(await call('stats'));}
 $('uploadedFileFilter').oninput=renderUploadedFiles;
 $('refreshUploadedFiles').onclick=refreshUploadedFiles;
-function applyDatabaseStats(s){uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];filesReady=true;renderUploadedFiles();refreshUploadedFiles();$('sheetCount').textContent=new Set(s['分頁'].map(r=>r.name)).size;const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':(s['索引資料列']?'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。':'資料庫目前為空，請上傳原始對照 Excel。');$('orderCount').textContent=s['不重複工單'].toLocaleString();$('pairCount').textContent=s['機種IC組合'];$('sources').innerHTML=table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows]));for(const id of ['lookup','match','fulltext','databaseUpload','databaseClear'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}
+function applyDatabaseStats(s){uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];filesReady=true;renderUploadedFiles();renderUploadedFilesStatus();$('databaseMetrics').hidden=!s['索引資料列'];if(!s['索引資料列']){$('query').value='';$('uploadedFileFilter').value='';for(const input of document.querySelectorAll('input[type=file]'))input.value='';}if(s.cleared_at&&!s['索引資料列'])$('databaseStatus').textContent='已清空本瀏覽器資料庫。所有資料與匯入清單已移除，可重新上傳。';$('sheetCount').textContent=new Set(s['分頁'].map(r=>r.name)).size;const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':(s['索引資料列']?'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。':'資料庫目前為空，請上傳原始對照 Excel。');$('orderCount').textContent=s['不重複工單'].toLocaleString();$('pairCount').textContent=s['機種IC組合'];$('sources').innerHTML=s['分頁'].length?table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows])):'';for(const id of ['lookup','match','fulltext','databaseUpload','databaseClear'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}
 call('stats').then(applyDatabaseStats).catch(error);
 
 const databaseWorker=new Worker(new URL('../browser-db-worker.js?v='+__BUILD_ID__,import.meta.url));let databaseId=0,databasePending=new Map(),databaseDownloadUrl;
@@ -93,12 +95,12 @@ $('databaseDownload').onclick=async()=>{try{const bytes=await databaseCall('down
 
 const databaseChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('AutoReport-database-changes'):null;
 function clearDatabaseResults(){clearDownload();$('uploadResults').innerHTML='';$('searchResults').innerHTML='';if(databaseDownloadUrl){URL.revokeObjectURL(databaseDownloadUrl);databaseDownloadUrl=null;}}
-if(databaseChannel)databaseChannel.onmessage=async()=>{try{await call('refresh');applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseStatus').textContent='另一個分頁已更新資料庫，已同步最新資料。';}catch(e){$('databaseStatus').textContent=e.message;}};
+if(databaseChannel)databaseChannel.onmessage=async({data})=>{if(data==='cleared'){for(const input of document.querySelectorAll('input[type=file]'))input.value='';location.reload();return;}try{await call('refresh');applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseStatus').textContent='另一個分頁已更新資料庫，已同步最新資料。';}catch(e){$('databaseStatus').textContent=e.message;}};
 $('databaseClear').onclick=async()=>{
  if(!confirm('確定清空本瀏覽器資料庫？所有對照及匯入清單將刪除，無法復原。建議先下載 SQLite 備份。'))return;
  const controls=['databaseClear','databaseUpload','databaseDownload','databaseFile','lookup','match','fulltext','file','export'];
  const before=controls.map(id=>$(id).disabled);controls.forEach(id=>$(id).disabled=true);
- try{const {reference}=await databaseCall('clear');await call('reload',{reference});applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseFile').value='';$('uploadedFileFilter').value='';renderUploadedFiles();databaseChannel?.postMessage('changed');$('databaseStatus').textContent='已清空本瀏覽器資料庫。重新整理後仍為空，可重新上傳原始對照 Excel，無需重新發布網站。';}
+ try{await databaseCall('clear');clearDatabaseResults();for(const input of document.querySelectorAll('input')){if(input.type==='file'||input.type==='text')input.value='';}databaseChannel?.postMessage('cleared');location.reload();}
  catch(e){$('databaseStatus').textContent=e.message;}
  finally{controls.forEach((id,i)=>$(id).disabled=before[i]);$('export').disabled=!downloads.length;}
 };

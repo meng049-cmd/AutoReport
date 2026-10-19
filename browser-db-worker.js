@@ -15,10 +15,12 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
   self.postMessage({id,progress:'正在清空本瀏覽器資料庫…'});
   const py=await initialize();const path='/app/data/cleared.sqlite3';
   if(py.FS.analyzePath(path).exists)py.FS.unlink(path);
-  const stats=JSON.parse(await py.runPythonAsync("import json\nwith autoreport.connect('/app/data/cleared.sqlite3') as db:\n    db.commit()\n    assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'\n    stats=autoreport.stats(db)\njson.dumps(stats,ensure_ascii=False)"));
-  const reference={stats,records:[],keys:[],uploaded_files:[],source_files:[],database_update:null};
+  const stats=JSON.parse(await py.runPythonAsync("import json\nwith autoreport.connect('/app/data/cleared.sqlite3') as db:\n    db.commit()\n    assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'\n    assert all(db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]==0 for table in ('sources','sheets','records','lookup_keys','raw_rows','work_orders'))\n    stats=autoreport.stats(db)\njson.dumps(stats,ensure_ascii=False)"));
+  const reference={stats,records:[],keys:[],uploaded_files:[],source_files:[],database_update:null,cleared_at:new Date().toISOString()};
   const database=py.FS.readFile(path).slice().buffer;
   await saveBrowserDatabase({version:1,database,reference});
+  const stored=await readBrowserDatabase(),saved=stored?.database&&new Uint8Array(stored.database),expected=new Uint8Array(database);
+  if(!saved||saved.length!==expected.length||!saved.every((byte,i)=>byte===expected[i])||stored.reference.records.length||stored.reference.keys.length||stored.reference.uploaded_files.length||stored.reference.source_files.length)throw Error('無法驗證資料庫已清空，請重新整理後確認。');
   py.FS.unlink(path);self.postMessage({id,result:{reference}});return;
  }
  if(type==='download'){const bytes=state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3');self.postMessage({id,result:bytes.buffer},[bytes.buffer]);return;}

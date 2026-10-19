@@ -30,14 +30,33 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  await page.locator('#lookup').click();await page.locator('#searchResults').getByText('多組候選').waitFor();
  await page.locator('#file').setInputFiles({name:'clear-query.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nWEBORDER123\n')});
  await page.locator('#match').click();await page.waitForFunction(()=>!document.querySelector('#export').disabled);
+ // Populate independent report and merge state before clearing the entire page.
+ const report=new ExcelJS.Workbook();report.addWorksheet('Detail').addRows([
+  ['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],
+  ['DAF外觀','WEBORDER123','99000123-001','Test','PPID1',new Date('2026-10-14'),'Tester','','GOOD','Goodix','BrowserModel']
+ ]);
+ const reportFile={name:'old-report.xlsx',mimeType:file.mimeType,buffer:Buffer.from(await report.xlsx.writeBuffer())};
+ await page.locator('#mergeFiles').setInputFiles(reportFile);await page.locator('#mergeDirect').click();await page.locator('#mergeResult').waitFor({state:'visible'});
+ await page.locator('#yieldFile').setInputFiles(reportFile);await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
  const other=await context.newPage();await other.goto(site);await other.waitForFunction(()=>!document.querySelector('#match').disabled);
- assert.notEqual(await other.locator('#orderCount').innerText(),'0');
- page.once('dialog',dialog=>dialog.accept());await page.locator('#databaseClear').click();
+ assert.notEqual(await other.locator('#orderCount').innerText(),'0');await other.locator('#file').setInputFiles(reportFile);
+ page.once('dialog',dialog=>dialog.accept());await Promise.all([page.waitForEvent('domcontentloaded',{timeout:120000}),page.locator('#databaseClear').click()]);
  await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
  assert.equal(await page.locator('#orderCount').innerText(),'0');assert.equal(await page.locator('#pairCount').innerText(),'0');
  assert.equal(await page.locator('#export').isDisabled(),true);
- assert.match(await page.locator('#uploadedFilesStatus').innerText(),/0 份/);
- await other.waitForFunction(()=>document.querySelector('#orderCount').textContent==='0');
+ assert.equal(await page.locator('#uploadedFilesStatus').innerText(),'尚無匯入資料。');
+ for(const target of [page,other]){
+  await target.waitForFunction(()=>document.querySelector('#databaseStatus')?.textContent.startsWith('已清空本瀏覽器資料庫'));
+  assert.equal(await target.locator('#databaseMetrics').isHidden(),true);
+  assert.equal(await target.locator('#uploadedFiles').innerText(),'');assert.equal(await target.locator('#sources').innerText(),'');
+  assert.equal(await target.locator('#query').inputValue(),'');
+  assert.equal(await target.locator('#uploadResults').innerText(),'');assert.equal(await target.locator('#searchResults').innerText(),'');
+  for(const id of ['mergeResult','matchedMergeResult','yieldResult','qualityDashboard','thresholdDashboard'])assert.equal(await target.locator('#'+id).isHidden(),true,id);
+  assert.equal(await target.evaluate(()=>[...document.querySelectorAll('input[type=file]')].every(el=>el.files.length===0)),true);
+  assert.doesNotMatch(await target.locator('body').innerText(),/web-reference\.xlsx|clear-query\.csv|old-report\.xlsx|BrowserModel/);
+ }
+
+ await other.waitForFunction(()=>document.querySelector('#orderCount')?.textContent==='0');
  await other.locator('#query').fill('WEBORDER123');await other.locator('#lookup').click();await other.locator('#searchResults').getByText('查無資料').waitFor();
  const [emptyDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#databaseDownload').click()]);
  await writeFile('/tmp/browser-cleared.sqlite3',await readFile(await emptyDownload.path()));
@@ -45,11 +64,11 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  await page.reload();await page.waitForFunction(()=>!document.querySelector('#match').disabled);assert.equal(await page.locator('#orderCount').innerText(),'0');
  await page.locator('#query').fill('WEBORDER123');await page.locator('#lookup').click();await page.locator('#searchResults').getByText('查無資料').waitFor();
  // Repeating clear is harmless, and a fresh upload still persists normally.
- page.once('dialog',dialog=>dialog.accept());await page.locator('#databaseClear').click();
+ page.once('dialog',dialog=>dialog.accept());await Promise.all([page.waitForEvent('domcontentloaded',{timeout:120000}),page.locator('#databaseClear').click()]);
  await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
  await page.locator('#databaseFile').setInputFiles(file);await page.locator('#databaseUpload').click();
  await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('已儲存在本瀏覽器'),{},{timeout:120000});
- await page.locator('#lookup').click();await page.locator('#searchResults').getByText('唯一匹配').waitFor();
+ await page.locator('#query').fill('WEBORDER123');await page.locator('#lookup').click();await page.locator('#searchResults').getByText('唯一匹配').waitFor();
  await other.waitForFunction(()=>document.querySelector('#orderCount').textContent!=='0');
  await page.reload();await page.waitForFunction(()=>!document.querySelector('#match').disabled);assert.notEqual(await page.locator('#orderCount').innerText(),'0');
  await other.close();
