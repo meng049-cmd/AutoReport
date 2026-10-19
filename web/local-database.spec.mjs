@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {chr
 test('web Excel update persists, deduplicates, preserves conflicts and downloads a real SQLite database',async()=>{
  const root=path.resolve('dist');const methods=[];const server=createServer(async(req,res)=>{methods.push(req.method);const pathname=new URL(req.url,'http://localhost').pathname;const file=path.resolve(root,pathname==='/'?'index.html':pathname.slice(1));if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}try{res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.wasm')?'application/wasm':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox']});
- try{const page=await browser.newPage();page.setDefaultTimeout(30000);page.on('request',r=>methods.push(r.method()));
+ try{const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(30000);page.on('request',r=>methods.push(r.method()));
  const site=process.env.LIVE_SITE_URL||`http://127.0.0.1:${server.address().port}/`;
  // Seed a real version-1 database before the application starts.
  await page.goto(new URL('browser-storage.js',site).href);
@@ -25,6 +25,35 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  await page.locator('#databaseFile').setInputFiles({name:'bad.xlsx',mimeType:file.mimeType,buffer:Buffer.from('broken')});await page.locator('#databaseUpload').click();await page.waitForFunction(()=>!document.querySelector('#databaseUpload').disabled,{},{timeout:120000});await page.locator('#query').fill('WEBORDER123');await page.locator('#lookup').click();await page.locator('#searchResults').getByText('唯一匹配').waitFor();
  for(const sheet of book.worksheets)sheet.getCell('B2').value='Elan';
  await page.locator('#databaseFile').setInputFiles({...file,buffer:Buffer.from(await book.xlsx.writeBuffer())});await page.locator('#databaseUpload').click();await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('新增 1 筆'),{},{timeout:120000});await page.locator('#query').fill('WEBORDER123');await page.locator('#lookup').click();await page.locator('#searchResults').getByText('多組候選').waitFor();assert.match(await page.locator('#searchResults').innerText(),/Goodix/);assert.match(await page.locator('#searchResults').innerText(),/Elan/);
+ // Cancel preserves data; accept clears SQLite, the matcher and every open tab.
+ page.once('dialog',dialog=>dialog.dismiss());await page.locator('#databaseClear').click();
+ await page.locator('#lookup').click();await page.locator('#searchResults').getByText('多組候選').waitFor();
+ await page.locator('#file').setInputFiles({name:'clear-query.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nWEBORDER123\n')});
+ await page.locator('#match').click();await page.waitForFunction(()=>!document.querySelector('#export').disabled);
+ const other=await context.newPage();await other.goto(site);await other.waitForFunction(()=>!document.querySelector('#match').disabled);
+ assert.notEqual(await other.locator('#orderCount').innerText(),'0');
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#databaseClear').click();
+ await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
+ assert.equal(await page.locator('#orderCount').innerText(),'0');assert.equal(await page.locator('#pairCount').innerText(),'0');
+ assert.equal(await page.locator('#export').isDisabled(),true);
+ assert.match(await page.locator('#uploadedFilesStatus').innerText(),/0 份/);
+ await other.waitForFunction(()=>document.querySelector('#orderCount').textContent==='0');
+ await other.locator('#query').fill('WEBORDER123');await other.locator('#lookup').click();await other.locator('#searchResults').getByText('查無資料').waitFor();
+ const [emptyDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#databaseDownload').click()]);
+ await writeFile('/tmp/browser-cleared.sqlite3',await readFile(await emptyDownload.path()));
+ execFileSync('.venv/bin/python',['-c',"import sqlite3;d=sqlite3.connect('/tmp/browser-cleared.sqlite3');assert d.execute('pragma integrity_check').fetchone()[0]=='ok';assert all(d.execute('select count(*) from '+t).fetchone()[0]==0 for t in ['sources','sheets','records','lookup_keys','raw_rows','work_orders'])"]);
+ await page.reload();await page.waitForFunction(()=>!document.querySelector('#match').disabled);assert.equal(await page.locator('#orderCount').innerText(),'0');
+ await page.locator('#query').fill('WEBORDER123');await page.locator('#lookup').click();await page.locator('#searchResults').getByText('查無資料').waitFor();
+ // Repeating clear is harmless, and a fresh upload still persists normally.
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#databaseClear').click();
+ await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
+ await page.locator('#databaseFile').setInputFiles(file);await page.locator('#databaseUpload').click();
+ await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('已儲存在本瀏覽器'),{},{timeout:120000});
+ await page.locator('#lookup').click();await page.locator('#searchResults').getByText('唯一匹配').waitFor();
+ await other.waitForFunction(()=>document.querySelector('#orderCount').textContent!=='0');
+ await page.reload();await page.waitForFunction(()=>!document.querySelector('#match').disabled);assert.notEqual(await page.locator('#orderCount').innerText(),'0');
+ await other.close();
+ console.log('Clear cancellation, cross-tab sync, empty SQLite, persistence, repeated clear and fresh upload verified.');
  assert.ok(methods.every(m=>m==='GET'),'source files never leave browser');console.log('Actual in-browser Python importer, IndexedDB reload, duplicate skip, invalid-file rollback and SQLite download verified.');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 });

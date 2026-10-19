@@ -6,7 +6,8 @@ const ready=fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'
 self.onmessage=async({data:{id,type,payload}})=>{
   try{
     await ready;let result;
-    if(type==='reload'){matcher=new Matcher(payload.reference);lastResult=null;result=true;}
+    if(type==='refresh'){const local=await readBrowserDatabase();const reference=local?.reference||await(await fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'})).json();matcher=new Matcher(reference);lastResult=null;result=true;}
+    else if(type==='reload'){matcher=new Matcher(payload.reference);lastResult=null;result=true;}
     else if(type==='stats')result={...matcher.data.stats,database_update:matcher.data.database_update,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files};
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
