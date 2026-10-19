@@ -2,7 +2,18 @@ import test from 'node:test';import assert from 'node:assert/strict';import {chr
 test('web Excel update persists, deduplicates, preserves conflicts and downloads a real SQLite database',async()=>{
  const root=path.resolve('dist');const methods=[];const server=createServer(async(req,res)=>{methods.push(req.method);const pathname=new URL(req.url,'http://localhost').pathname;const file=path.resolve(root,pathname==='/'?'index.html':pathname.slice(1));if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}try{res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.wasm')?'application/wasm':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox']});
- try{const page=await browser.newPage();page.on('request',r=>methods.push(r.method()));await page.goto(process.env.LIVE_SITE_URL||`http://127.0.0.1:${server.address().port}/`);await page.waitForFunction(()=>!document.querySelector('#match').disabled);const old=await page.locator('#orderCount').innerText();assert.equal(await page.locator('#databaseUpload').getAttribute('href'),null);
+ try{const page=await browser.newPage();page.setDefaultTimeout(30000);page.on('request',r=>methods.push(r.method()));
+ const site=process.env.LIVE_SITE_URL||`http://127.0.0.1:${server.address().port}/`;
+ // Seed a real version-1 database before the application starts.
+ await page.goto(new URL('browser-storage.js',site).href);
+ await page.evaluate(()=>new Promise((resolve,reject)=>{
+  const request=indexedDB.open('AutoReport-local-database',1);
+  request.onupgradeneeded=()=>request.result.createObjectStore('state');
+  request.onerror=()=>reject(request.error);
+  request.onsuccess=()=>{const db=request.result,tx=db.transaction('state','readwrite');tx.objectStore('state').put({version:1,reference:{obsolete:true},database:new ArrayBuffer(10)},'active');tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};
+ }));
+ await page.goto(site);await page.waitForFunction(()=>!document.querySelector('#match').disabled);const old=await page.locator('#orderCount').innerText();assert.equal(old,'0');
+ assert.equal(await page.evaluate(()=>new Promise((resolve,reject)=>{const request=indexedDB.open('AutoReport-local-database',2);request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,tx=db.transaction('state');const read=tx.objectStore('state').get('active');read.onsuccess=()=>{db.close();resolve(read.result===undefined);};};})),true,'version-1 browser data must be deleted');assert.equal(await page.locator('#databaseUpload').getAttribute('href'),null);
  const book=new ExcelJS.Workbook();for(const name of ['工單（A16）','CY26','工單（CY24&25）','重工工單1','NPI']){const sheet=book.addWorksheet(name);sheet.addRow(['機種','IC','料號','工單']);sheet.addRow(['BrowserModel','Goodix','99000123-001','WEBORDER123']);}
  const file={name:'web-reference.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await book.xlsx.writeBuffer())};
  await page.locator('#databaseFile').setInputFiles(file);await page.locator('#databaseUpload').click();await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('已儲存在本瀏覽器'),{},{timeout:120000});assert.match(await page.locator('#databaseStatus').innerText(),/新增 1 筆，跳過重複 4 筆/);

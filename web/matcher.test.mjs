@@ -5,18 +5,27 @@ import {execFileSync} from 'node:child_process';
 import ExcelJS from 'exceljs';
 import {Matcher,norm,firstText,role} from './matcher.mjs';
 import {matchFile,inputTables,exportMatches} from './files.mjs';
-const matcher=new Matcher(JSON.parse(readFileSync('dist/reference.json','utf8')));
+const productionMatcher=new Matcher(JSON.parse(readFileSync('dist/reference.json','utf8')));
+// Matching rules use explicit test records, independent of the shipped database.
+const records=[
+ {id:1,model:'Test Model',ic:'Goodix',orders:['C515-250300004'],parts:['98000320-107']},
+ {id:2,model:'Conflict Model',ic:'Goodix',orders:['C533-260100003'],parts:[]},
+ {id:3,model:'Conflict Model',ic:'Synaptics',orders:['C533-260100003'],parts:[]}
+].map(r=>({family:'',dpns:[],source_file:'test.xlsx',sheet:'Test',row_number:2,raw_ic:r.ic,resolution:[],search_text:'',...r}));
+const keys=records.flatMap(r=>[...r.orders.map(v=>['order',norm(v),r.id]),...r.parts.map(v=>['part',norm(v),r.id]),['ic',norm(r.ic),r.id],['model',norm(r.model),r.id]]);
+const matcher=new Matcher({records,keys});
 const python='.venv/bin/python';
 function oracle(code){return JSON.parse(execFileSync(python,['-c',code],{encoding:'utf8',maxBuffer:30*1024*1024}));}
 test('every indexed identifier returns exactly the SQLite candidates and evidence',()=>{
  const expected=oracle("import autoreport as a,json\ndb=a.connect()\nprint(json.dumps([[kind,value,a.lookup(db,[(kind,value)])] for kind,value in db.execute('SELECT DISTINCT kind,value FROM lookup_keys ORDER BY kind,value')],ensure_ascii=False))");
- for(const [kind,value,result] of expected)assert.deepEqual(matcher.lookup([[kind,value]]),result,kind+':'+value);
- console.log(`Compared ${expected.length} identifiers, including all 1268 work orders`);
+ if(!expected.length){assert.deepEqual(productionMatcher.data.records,[]);assert.deepEqual(productionMatcher.data.keys,[]);assert.equal(productionMatcher.lookup([['order','OLD123']])['狀態'],'查無資料');}
+ for(const [kind,value,result] of expected)assert.deepEqual(productionMatcher.lookup([[kind,value]]),result,kind+':'+value);
+ console.log(`Compared ${expected.length} identifiers, from the shipped database`);
 });
 test('sample XLSX matches the full Python result including all original cells',async()=>{
  const filename='上傳查詢範例.xlsx',bytes=readFileSync('downloads/AutoReport_query_template.xlsx');
  const expected=oracle("import autoreport as a,json\nfrom pathlib import Path\nprint(json.dumps(a.match_upload(a.connect(),Path('downloads/AutoReport_query_template.xlsx').read_bytes(),'上傳查詢範例.xlsx'),ensure_ascii=False))");
- const actual=await matchFile(matcher,bytes,filename);assert.deepEqual(actual,expected);
+ const actual=await matchFile(productionMatcher,bytes,filename);assert.deepEqual(actual,expected);
  const exported=await exportMatches(actual),book=new ExcelJS.Workbook();await book.xlsx.load(exported);assert.equal(book.worksheets[0].rowCount,16);
 });
 test('Chinese aliases, width, prefixes and first entries retain names with slash/comma',()=>{
