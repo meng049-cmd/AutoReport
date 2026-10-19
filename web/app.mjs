@@ -56,7 +56,7 @@ $('match').onclick=async()=>{
  }catch(e){error(e);$('export').disabled=!downloads.length;}
  finally{$('match').disabled=false;$('file').disabled=false;}
 };
-$('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)));
+$('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)),{matched:true});
 $('uploadResults').onclick=e=>{const button=e.target.closest('[data-download]');if(!button)return;const d=downloads[Number(button.dataset.download)];if(d)saveDownload(d.url,d.name);};
 $('file').onchange=()=>{clearDownload();$('uploadResults').innerHTML='';$('export').textContent='匯出 Excel';$('message').textContent='已選擇 '+$('file').files.length+' 個檔案，請點「開始比對」。';};
 $('export').onclick=()=>{

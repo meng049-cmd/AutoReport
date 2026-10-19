@@ -58,8 +58,11 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(filled.getWorksheet('Detail').getCell('J2').value,'Goodix');assert.equal(filled.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
   assert.equal(filled.getWorksheet('Detail').getCell('F2').numFmt,'yyyy/mm/dd');assert.equal(filled.getWorksheet('Data').getCell('A1').value,'原始資料');
   await page.locator('#mergeMatched').click();
-  await page.locator('#mergeResult').waitFor({state:'visible'});
-  const [mergedMatch]=await Promise.all([page.waitForEvent('download'),page.locator('#mergeDownload').click()]);
+  await page.locator('#matchedMergeResult').waitFor({state:'visible'});
+  assert.equal(await page.locator('#matchedMergeDownload').evaluate(el=>el.closest('.panel').contains(document.querySelector('#mergeMatched'))),true,'merged download stays next to the initiating button');
+  assert.match(await page.locator('#matchedMergeMessage').innerText(),/合併完成/);
+  assert.equal(await page.locator('#matchedMergeDownload').getAttribute('href'),await page.locator('#mergeDownload').getAttribute('href'));
+  const [mergedMatch]=await Promise.all([page.waitForEvent('download'),page.locator('#matchedMergeDownload').click()]);
   assert.equal(mergedMatch.suggestedFilename(),'2026_w41_1011-1011.xlsx');
   const mergedMatchedBook=new ExcelJS.Workbook();await mergedMatchedBook.xlsx.readFile(await mergedMatch.path());
   assert.deepEqual(mergedMatchedBook.worksheets.map(s=>s.name),['Detail']);
@@ -129,6 +132,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(await page.locator('#message').evaluate(el=>el.closest('.panel')?.querySelector('#export')!==null),true,'download feedback is next to the upload controls');
   await page.locator('#file').setInputFiles({name:'new.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nmissing\n')});
   assert.equal(await page.locator('#export').isDisabled(),true,'a changed file invalidates the previous download');
+  assert.equal(await page.locator('#matchedMergeResult').isHidden(),true);assert.equal(await page.locator('#matchedMergeDownload').getAttribute('href'),null);
   const first=Buffer.from(await detailBook.xlsx.writeBuffer());detail.getCell('A2').value='第二份原始內容';
   const second=Buffer.from(await detailBook.xlsx.writeBuffer());
   await page.locator('#file').setInputFiles([
