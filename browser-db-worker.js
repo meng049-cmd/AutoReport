@@ -1,4 +1,4 @@
-importScripts('browser-storage.js');
+importScripts('browser-storage.js?v=2');
 let runtime;
 const get=async path=>{const r=await fetch(new URL(path,self.location.href));if(!r.ok)throw Error('無法載入瀏覽器資料庫工具。');return new Uint8Array(await r.arrayBuffer());};
 async function initialize(){
