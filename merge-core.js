@@ -5,11 +5,12 @@
   function ngRecord(row,value,statusColumn) {
     const status=String(row[statusColumn]??'').trim().toUpperCase(),defect=statusColumn===7?'':String(row[7]??'').trim();
     if(status!=='FAIL'&&!defect)return null;
-    return {serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
+    return {order:String(row[1]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
+  const isAnalysisProcess=value=>!['正面AOI','背面AOI'].includes(String(value??'').normalize('NFKC').replace(/\s+/g,'').toUpperCase());
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
   class DetailMerger {
-    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
+    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.analysisFirstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
     static readBook(XLSX,bytes) {
       const names=XLSX.read(bytes,{type:'array',bookSheets:true}).SheetNames.filter(name=>name.trim().toLowerCase()==='detail');
       if(names.length!==1)throw Error('找不到唯一的 Detail 分頁。');
@@ -29,7 +30,7 @@
         for (const title of ['產出時間', '狀態']) if (header.filter(value => value === title).length !== 1) throw new Error(`須包含唯一的「${title}」欄位。`);
         this.time = header.indexOf('產出時間'); this.status = header.indexOf('狀態');
       } else if (JSON.stringify(header) !== JSON.stringify(this.header)) throw new Error(`${filename}：Detail 欄位標題與順序不一致。`);
-      const localNG=new Map(),localDefectKeys=new Set(),fileValues=[];
+      const localNG=new Map(),localAnalysisNG=new Map(),localDefectKeys=new Set(),fileValues=[];
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         const process = String(row[0] ?? '').trim(), serial = String(row[4] ?? '').trim();
@@ -44,7 +45,7 @@
         const key = JSON.stringify([day, process, serial]);
         const value={row,day,timestamp:normalized,key};fileValues.push(value);
         const ng=ngRecord(row,value,this.status),first=localNG.get(serial);
-        if(ng){localDefectKeys.add(key);if(preferNG(ng,first))localNG.set(serial,ng);}
+        if(ng){localDefectKeys.add(key);if(preferNG(ng,first))localNG.set(serial,ng);if(isAnalysisProcess(process)&&preferNG(ng,localAnalysisNG.get(serial)))localAnalysisNG.set(serial,ng);}
         const old = this.rows.get(key);
         if (!old || (status === 'FAIL' && String(old.row[this.status]).trim().toUpperCase() !== 'FAIL')) this.rows.set(key,value);
         this.total++;
@@ -55,12 +56,23 @@
         const validKeys=new Set(fileValues.map(v=>v.key));
         const saved=JSON.parse(book.Custprops?.AutoReportFirstNG||'null');
         if([2,3,4].includes(saved?.version)&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
-          if(saved.version===4){saved.records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5]}));saved.defectKeys=[...localDefectKeys,...saved.extraDefectKeys];}
+          if(saved.version===4){saved.records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||''}));saved.defectKeys=[...localDefectKeys,...saved.extraDefectKeys];}
           const keys=new Set(saved.defectKeys),serials=new Set(saved.records.map(r=>r?.serial));
           const valid=(saved.version===2||[...localDefectKeys].every(k=>keys.has(k)))&&saved.defectKeys.every(k=>typeof k==='string'&&validKeys.has(k))&&serials.size===saved.records.length&&saved.records.every(r=>r&&typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&r.defect.trim()&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&typeof r.date==='string'&&keys.has(JSON.stringify([r.date,r.process,r.serial])))&&saved.defectKeys.every(k=>serials.has(JSON.parse(k)[2]));
           if(valid){candidates=new Map(saved.records.map(r=>[r.serial,r]));for(const [serial,ng] of localNG)if(preferNG(ng,candidates.get(serial)))candidates.set(serial,ng);defectKeys=new Set([...keys,...localDefectKeys]);}
         }
       } catch { /* Older or edited files are analyzed from their readable Detail rows. */ }
+      let analysisCandidates=new Map([...candidates].filter(([,ng])=>isAnalysisProcess(ng.process)));
+      try{const saved=JSON.parse(book.Custprops?.AutoReportAnalysisNG||'null'),validKeys=new Set(fileValues.map(v=>v.key));
+        if(saved?.version===1&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
+          const records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||''}));
+          if(new Set(records.map(r=>r.serial)).size===records.length&&records.every(r=>typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&typeof r.order==='string'&&r.defect.trim()&&isAnalysisProcess(r.process)&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&validKeys.has(JSON.stringify([r.date,r.process,r.serial]))))analysisCandidates=new Map(records.map(r=>[r.serial,r]));
+        }
+      }catch{}
+      for(const [serial,ng] of localAnalysisNG)if(preferNG(ng,analysisCandidates.get(serial)))analysisCandidates.set(serial,ng);
+      const readableOrders=new Map(fileValues.map(v=>[v.key,String(v.row[1]??'').trim()]));
+      for(const ng of analysisCandidates.values())if(!ng.order)ng.order=readableOrders.get(JSON.stringify([ng.date,ng.process,ng.serial]))||'';
+      for(const [serial,ng] of analysisCandidates)if(preferNG(ng,this.analysisFirstNG.get(serial)))this.analysisFirstNG.set(serial,ng);
       for(const [serial,ng] of candidates)if(preferNG(ng,this.firstNG.get(serial)))this.firstNG.set(serial,ng);
       for(const key of defectKeys)this.defectKeys.add(key);
     }
@@ -81,11 +93,12 @@
         if (cell) cell.z = 'yyyy-mm-dd hh:mm:ss';
       }
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Detail');
-      book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect]),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
+      book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
+      book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.analysisFirstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, start_date: first, end_date: last};
     }
   }
-  root.DetailMerger = DetailMerger;
+  root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;
   if (typeof module !== 'undefined') module.exports = DetailMerger;
 })(typeof self !== 'undefined' ? self : globalThis);

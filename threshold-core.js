@@ -5,7 +5,7 @@ function buildDefectComposition(merger){
  const stages={正面AOI:'SMT',DAF外觀:'前段',DAF熱壓投入:'前段',功能一測試:'前段',功能二測試:'後段',外觀檢查點亮測試:'後段',輝度機測試:'後段'};
  const items=new Map(),processTotals=new Map(),stageTotals=new Map(),processFails=new Map(),stageFails=new Map();
  for(const value of merger.rows.values()){
-  const row=value.row;
+  const row=value.row;if(!root.isAnalysisProcess(row[0]))continue;
   const status=String(row[merger.status]).trim().toUpperCase();
   if(!['GOOD','FAIL'].includes(status))continue;
   const process=root.canonicalProcess(row[0]),stage=stages[process]||'',defect=String(row[7]??'').trim()||'【未填不良項目】',key=JSON.stringify([process,defect]);
@@ -14,7 +14,7 @@ function buildDefectComposition(merger){
   if(merger.hasDefect(value)){processFails.set(process,(processFails.get(process)||0)+1);if(stage)stageFails.set(stage,(stageFails.get(stage)||0)+1);}
  }
  // Numerators use one first-encountered defect per PPID; denominators retain merged input counts.
- for(const first of merger.firstNG.values()){
+ for(const first of merger.analysisFirstNG.values()){
   const process=root.canonicalProcess(first.process),stage=stages[process]||'',defect=first.defect,key=JSON.stringify([process,defect]);
   const item=items.get(key)||{process,stage,defect,count:0};item.count++;items.set(key,item);
  }
@@ -23,10 +23,10 @@ function buildDefectComposition(merger){
 function buildThresholdAnalysis(merger,calculation,identities){
  const dailyGlobal=new Map(),dailyProducts=new Map(),failRows=new Map();
  for(const value of merger.rows.values()){
-  const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),product=identity.id,day=value.day,process=root.canonicalProcess(row[0]);
+  if(!root.isAnalysisProcess(value.row[0]))continue;const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),product=identity.id,day=value.day,process=root.canonicalProcess(row[0]);
   const add=(map,key)=>{const set=map.get(key)||new Set();set.add(serial);map.set(key,set);};add(dailyGlobal,day);add(dailyProducts,JSON.stringify([product,day]));
  }
- for(const first of merger.firstNG.values()){
+ for(const first of merger.analysisFirstNG.values()){
   const identity=identities.get(first.serial),key=JSON.stringify([identity.id,first.date]),list=failRows.get(key)||[];
   list.push({serial:first.serial,process:root.canonicalProcess(first.process),defect:first.defect,time:first.timestamp});failRows.set(key,list);
  }
@@ -42,12 +42,12 @@ function buildThresholdAnalysis(merger,calculation,identities){
   const observed=new Map();
   for(const value of merger.rows.values()){
    if(value.day!==check.date)continue;
-   const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),process=root.canonicalProcess(row[0]);
+   if(!root.isAnalysisProcess(value.row[0]))continue;const row=value.row,serial=String(row[4]).trim(),identity=identities.get(serial),process=root.canonicalProcess(row[0]);
    if(identity?.id!==check.product||!check.processes.includes(process)||!merger.hasDefect(value))continue;
    const defect=String(row[7]??'').trim()||'【未填不良項目】',groupKey=JSON.stringify([process,defect]);
    const item=observed.get(groupKey)||{...check,process,defect,observedSerials:new Set(),attributedSerials:new Set()};
    item.observedSerials.add(serial);
-   const assigned=merger.firstNG.get(serial);
+   const assigned=merger.analysisFirstNG.get(serial);
    if(assigned&&assigned.date===value.day&&root.canonicalProcess(assigned.process)===process&&assigned.defect===defect)item.attributedSerials.add(serial);
    observed.set(groupKey,item);
   }

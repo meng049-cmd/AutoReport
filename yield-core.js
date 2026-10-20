@@ -1,6 +1,6 @@
 (function(root){
 'use strict';
-const preferred=['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試','正面AOI','背面AOI'];
+const preferred=['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'];
 function canonical(value){
  const name=String(value).trim().replace(/\s+/g,'');
  const aliases={'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測試':'功能一測試','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮測試':'外觀檢查點亮測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測試':'輝度機測試','輝度機測':'輝度機測試'};
@@ -11,6 +11,7 @@ function buildYieldReport(merger,identities){
  if(merger.time!==5)throw Error('主檔 F 欄須為產出時間。');
  if(merger.header?.[9]!=='IC'||merger.header?.[10]!=='機種')throw Error('主檔 J 欄須為 IC、K 欄須為機種，請先完成比對。');
  for(const value of merger.rows.values()){
+  if(!root.isAnalysisProcess(value.row[0]))continue;
   const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=String(row[10]??'').trim(),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
   const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel)pendingRows.push(row);
   const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
@@ -45,19 +46,19 @@ function buildYieldReport(merger,identities){
   }
   processRows.push([]);
   stageRows.push([model]);stageRows.push([ic,...dates]);
-  for(const [stage,offset,length] of [['SMT',6,1],['前段',0,3],['後段',3,3]]){
+  for(const [stage,offset,length] of [['SMT',6,0],['前段',0,3],['後段',3,3]]){
    const r=stageRows.length+1;stageRows.push([stage]);
    for(let c=0;c<dates.length;c++){
     const column=XLSX.utils.encode_col(c+1),from=start+offset,to=from+length-1;
     const values=order.slice(offset,offset+length).map(process=>counts.get(JSON.stringify([product,dates[c],process]))).filter(Boolean).map(v=>v.good/(v.good+v.fail));
-    const formula=stage==='SMT'?`IF('每日製程良率'!${column}${from}="","",'每日製程良率'!${column}${from})`:`IFERROR(_xlfn.AGGREGATE(1,6,'每日製程良率'!${column}${from}:${column}${to}),"")`;
+    const formula=stage==='SMT'?'""':`IFERROR(_xlfn.AGGREGATE(1,6,'每日製程良率'!${column}${from}:${column}${to}),"")`;
     if(values.length)stageChecks.push({product,ic,model,date:dates[c],stage,yield:values.reduce((a,b)=>a+b,0)/values.length,processes:order.slice(offset,offset+length)});
     stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:values.length?'n':'s',v:values.length?values.reduce((a,b)=>a+b,0)/values.length:'',f:formula,z:'0.00%'};
    }
   }
   stageRows.push([]);
  }
- const finish=(rows,cells)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);Object.assign(sheet,cells);sheet['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length-1,c:dates.length}});sheet['!cols']=[{wch:28},...dates.map(()=>({wch:16}))];return sheet;};
+ const finish=(rows,cells)=>{if(!rows.length)rows=[['無納入分析的製程',...dates]];const sheet=XLSX.utils.aoa_to_sheet(rows);Object.assign(sheet,cells);sheet['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length-1,c:dates.length}});sheet['!cols']=[{wch:28},...dates.map(()=>({wch:16}))];return sheet;};
  const book=XLSX.utils.book_new();book.Custprops=merged.book.Custprops;
  XLSX.utils.book_append_sheet(book,finish(processRows,processSheet),'每日製程良率');
  XLSX.utils.book_append_sheet(book,finish(stageRows,stageSheet),'每日階段良率');
