@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows} from './defect-analysis.mjs';
+import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
@@ -27,4 +27,9 @@ test('day, ISO week and month ranges retain empty dates and deduplicate inputs a
  const selected={startDate:'2026-10-05',endDate:'2026-10-05',product};assert.equal(attributedRows(analysis,selected).some(r=>r.serial==='a'),false,'later first FAIL is not reassigned to a selected earlier GOOD defect');assert.equal(cohortInput(analysis,selected),3);
  const order=workOrderRows(analysis,range);assert.equal(order.length,1);assert.equal(order[0].input,3);assert.equal(order[0].count,2);assert.equal(order[0].order,'o');assert.match(order[0].defects,/first FAIL/);
  const leaves=allDefectLevels(analysis,range).filter(r=>r.level==='defect');assert.equal(leaves.reduce((n,r)=>n+r.count,0),2);assert.ok(leaves.every(r=>r.date==='2026-W41'));
+});
+
+
+test('week labels show month/day intervals and preserve cross-year boundaries',()=>{
+ assert.equal(periodLabel('2026-W42','week'),'10/12–10/18');assert.equal(periodLabel('2020-W53','week'),'2020/12/28–2021/01/03');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/12–10/18');
 });

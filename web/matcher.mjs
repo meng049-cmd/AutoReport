@@ -57,16 +57,16 @@ export class Matcher {
   search(q){return this.data.records.filter(r=>r.search_text.includes(norm(q))).slice(0,100);}
 }
 export function matchTables(matcher,tables,filename){
-  const results=[],notices=[];
+  const results=[],notices=[],lookups=new Map();
   for(const {name,raw,expanded} of tables){
     let header=null;
-    for(let i=0;i<Math.min(raw.length,50);i++){const roles=raw[i].map(role),score=roles.filter(Boolean).length;if(score&&(!header||score>header.score))header={score,offset:i,headers:raw[i],roles};}
+    for(let i=0;i<Math.min(raw.length,50);i++){const roles=(raw[i]||[]).map(role),score=roles.filter(Boolean).length;if(score&&(!header||score>header.score))header={score,offset:i,headers:raw[i]||[],roles};}
     if(!header){notices.push(`「${name}」沒有可辨識的查找欄位；請使用工單號、料號、DPN、機種、IC／機型或查詢值。`);continue;}
     for(let i=header.offset+1;i<raw.length;i++){
-      if(!raw[i].some(Boolean))continue;
-      const criteria=header.roles.flatMap((r,c)=>r&&expanded[i][c]?[[r,expanded[i][c]]]:[]),result=matcher.lookup(criteria);
+      if(!(raw[i]||[]).some(Boolean))continue;
+      const criteria=header.roles.flatMap((r,c)=>r&&expanded[i][c]?[[r,expanded[i][c]]]:[]),key=JSON.stringify(criteria);if(!lookups.has(key))lookups.set(key,matcher.lookup(criteria));const result=lookups.get(key);
       const unique=result['狀態']==='唯一匹配'?result['候選'][0]:{};
-      results.push({'分頁':name,'列號':i+1,'原始資料':header.headers.map((h,c)=>({'欄位':h,'值':raw[i][c]})),'機種':unique['機種']||'',IC:unique.IC||'',...result});
+      results.push({'分頁':name,'列號':i+1,'原始資料':[...new Set([...Object.keys(header.headers),...Object.keys(raw[i])])].map(Number).sort((a,b)=>a-b).map(c=>({'欄位':header.headers[c]||'','值':raw[i][c]||''})),'機種':unique['機種']||'',IC:unique.IC||'',...result});
     }
   }
   return {'檔名':filename,'筆數':results.length,'提示':notices,'結果':results};

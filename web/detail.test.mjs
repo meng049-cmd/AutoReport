@@ -52,3 +52,10 @@ test('small compressed workbook with 90000 data rows exports on a bounded call s
 test('non-XLSX bytes named xlsx fail with an actionable format message before matching',async()=>{
  await assert.rejects(matchFile({lookup(){throw Error('matching should not run');}},new Uint8Array([0x35,0xf4,0x48,0xaf,0xde,0x3e,0xe4,0xb9]),'DAF偏移和CG.xlsx'),/不是可讀的標準 XLSX/);
 });
+
+test('Detail matching reads more than 100000 rows, caches repeated criteria and preserves unrelated wide sheets',async()=>{
+ const book=new ExcelJS.Workbook(),detail=book.addWorksheet('Detail');detail.addRow(['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態']);const other=book.addWorksheet('大型輔助頁');other.getCell('XFD100005').value='保留欄位與內容';
+ const zip=await JSZip.loadAsync(await book.xlsx.writeBuffer()),sheetPath='xl/worksheets/sheet1.xml';let xml=await zip.file(sheetPath).async('string');const rows=[];const count=100005;for(let n=2;n<=count+1;n++)rows.push(`<row r="${n}"><c r="A${n}" t="inlineStr"><is><t>DAF外觀</t></is></c><c r="B${n}" t="inlineStr"><is><t>ORDER1</t></is></c><c r="E${n}" t="inlineStr"><is><t>PPID${n}</t></is></c><c r="I${n}" t="inlineStr"><is><t>GOOD</t></is></c></row>`);xml=xml.replace('</sheetData>',rows.join('')+'</sheetData>');zip.file(sheetPath,xml);const bytes=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
+ let calls=0;const result=await matchFile({lookup(){calls++;return {'狀態':'唯一匹配','候選':[{'機種':'LargeModel',IC:'IC'}]};}},bytes,'large.xlsx');assert.equal(result['筆數'],count);assert.equal(calls,1);assert.equal(result['結果'].at(-1)['列號'],100006);
+ const output=await JSZip.loadAsync(await exportMatches(result)),updated=await output.file(sheetPath).async('string');assert.match(updated,/<c r="K100006" t="inlineStr"><is><t>LargeModel<\/t>/);assert.deepEqual(await output.file('xl/worksheets/sheet2.xml').async('uint8array'),await zip.file('xl/worksheets/sheet2.xml').async('uint8array'));
+});

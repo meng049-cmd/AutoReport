@@ -23,8 +23,8 @@ def append_excel(database, excel, metadata=None, commit=None):
     database, excel = Path(database), Path(excel)
     if excel.suffix.lower() != '.xlsx' or not excel.is_file():
         raise ValueError('請上傳 Excel 原始對照資料（.xlsx）。')
-    if not 0 < excel.stat().st_size <= 20 * 1024 * 1024:
-        raise ValueError('來源 Excel 必須介於 1 byte 與 20 MB。')
+    if not 0 < excel.stat().st_size <= 100 * 1024 * 1024:
+        raise ValueError('來源 Excel 必須介於 1 byte 與 100 MB。')
     if not database.is_file():
         raise ValueError('缺少既有資料庫；追加更新不會建立空白資料庫。')
     payload = excel.read_bytes()

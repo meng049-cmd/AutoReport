@@ -47,6 +47,16 @@ test('CSV quoted newline, UTF-8, Big5 and GB18030, unsupported and oversized fil
  const bytes=new TextEncoder().encode('\uFEFF工單號碼,機型,備註\r\n"C515-250300004\nC533-260100003",Goodix,"a,b"\r\n');
  const result=await matchFile(matcher,bytes,'query.csv');assert.equal(result['筆數'],1);assert.equal(result['結果'][0]['狀態'],'唯一匹配');assert.equal(result['結果'][0]['原始資料'][2]['值'],'a,b');
  for(const encoding of ['cp950','gb18030']){const encoded=execFileSync(python,['-c',`import sys;sys.stdout.buffer.write('工單號碼,機型\\nC515-250300004,Goodix\\n'.encode('${encoding}'))`]);assert.equal((await matchFile(matcher,encoded,'query.csv'))['結果'][0]['狀態'],'唯一匹配');}
- await assert.rejects(inputTables(new Uint8Array(20*1024*1024+1),'x.xlsx'),/20 MB/);
+ await assert.rejects(inputTables(new Uint8Array(100*1024*1024+1),'x.xlsx'),/100 MB/);
  await assert.rejects(inputTables(new Uint8Array(),'x.xls'),/xlsx/);
+});
+
+test('wide and sparse worksheets retain populated cells beyond 512 columns without rectangular expansion',async()=>{
+ const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('查詢');sheet.getCell('A1').value='工單號碼';sheet.getCell('A2').value='ORDER1';sheet.getCell('XFD2').value='最右欄';sheet.getCell('A100005').value='ORDER2';
+ const tables=await inputTables(await book.xlsx.writeBuffer(),'wide.xlsx');assert.equal(tables[0].raw[1][16383],'最右欄');assert.equal(tables[0].raw[100004][0],'ORDER2');assert.equal(Object.keys(tables[0].raw[1]).length,2);assert.equal(Object.keys(tables[0].raw).length,3);
+ const result=await matchFile({lookup(){return {'狀態':'查無資料','候選':[]};}},await book.xlsx.writeBuffer(),'wide.xlsx');assert.equal(result['筆數'],2);assert.equal(result['結果'][1]['列號'],100005);
+});
+
+test('CSV matching supports more than 100000 rows and 512 columns',async()=>{
+ const rows='工單號碼'+','.repeat(599)+'備註\n'+'ORDER1'+','.repeat(599)+'尾欄\n'+('ORDER1\n').repeat(100004);let calls=0;const result=await matchFile({lookup(){calls++;return {'狀態':'查無資料','候選':[]};}},new TextEncoder().encode(rows),'large.csv');assert.equal(result['筆數'],100005);assert.equal(calls,1);assert.equal(result['結果'].at(-1)['列號'],100006);
 });

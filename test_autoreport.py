@@ -45,6 +45,32 @@ def fixture():
     return buf.getvalue()
 
 
+class LargeWorksheetTests(unittest.TestCase):
+    def test_sparse_far_column_and_last_row_are_read_without_rectangle(self):
+        book = Workbook()
+        sheet = book.active
+        sheet.title = '大型對照'
+        sheet.append(['機種', 'IC', '料號', '工單'])
+        sheet.append(['Model', 'Goodix', 'PART1', 'ORDER1'])
+        for column, value in enumerate(['LastModel', 'Elan', 'PART2', 'ORDER2'], 1):
+            sheet.cell(100005, column, value)
+        sheet.cell(100005, 16384, '保留遠欄')
+        stream = io.BytesIO()
+        book.save(stream)
+        rows = a.excel_sheets(stream.getvalue(), ['大型對照'])[0][1]
+        self.assertEqual(len(rows), 100005)
+        self.assertEqual(rows[1], ['Model', 'Goodix', 'PART1', 'ORDER1'])
+        self.assertEqual(rows[-1][16383], '保留遠欄')
+        with tempfile.TemporaryDirectory() as tmp:
+            db = a.connect(Path(tmp) / 'large.sqlite3')
+            try:
+                a.import_excel(db, stream.getvalue(), 'large.xlsx', ['大型對照'])
+                self.assertEqual(a.lookup(db, [('order', 'ORDER2')])['候選'][0]['機種'], 'LastModel')
+                self.assertEqual(a.stats(db)['索引資料列'], 2)
+            finally:
+                db.close()
+
+
 class DatabaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

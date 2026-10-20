@@ -11,8 +11,11 @@ export function periodBounds(key,mode='day'){
  if(mode==='week'){if(!/^\d{4}-W\d{2}$/.test(key))return null;const [y,w]=key.split('-W').map(Number),jan4=new Date(Date.UTC(y,0,4)),start=Date.UTC(y,0,4)-(jan4.getUTCDay()+6)%7*dayMs+(w-1)*7*dayMs;if(periodKey(iso(start),'week')!==key)return null;return {start:iso(start),end:iso(start+6*dayMs)};}
  if(!/^\d{4}-\d{2}-\d{2}$/.test(key)||!Number.isFinite(Date.parse(key+'T00:00:00Z'))||iso(Date.parse(key+'T00:00:00Z'))!==key)return null;return {start:key,end:key};
 }
+export function periodLabel(key,mode='day'){
+ if(mode!=='week')return key;const bounds=periodBounds(key,'week');if(!bounds)return key;return bounds.start.slice(0,4)===bounds.end.slice(0,4)?bounds.start.slice(5).replace('-','/')+'–'+bounds.end.slice(5).replace('-','/'):bounds.start.replaceAll('-','/')+'–'+bounds.end.replaceAll('-','/');
+}
 export function calendarBuckets(start,end,mode='day'){
- const map=new Map();for(const date of calendarDates(start,end)){const key=periodKey(date,mode);if(!map.has(key))map.set(key,{key,label:key,...periodBounds(key,mode)});}return [...map.values()];
+ const map=new Map();for(const date of calendarDates(start,end)){const key=periodKey(date,mode);if(!map.has(key))map.set(key,{key,label:periodLabel(key,mode),...periodBounds(key,mode)});}return [...map.values()];
 }
 function matches(row,filters,ignoreDefect=false){return (!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
 export function attributedRows(analysis,filters={}){return analysis.attribution.filter(row=>matches(row,filters));}

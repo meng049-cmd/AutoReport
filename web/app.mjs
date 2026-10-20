@@ -1,4 +1,6 @@
-import './yield-ui.mjs';
+import './file-library-ui.mjs';
+import {addLibraryFile,clearFileLibrary,beginFileOperation,endFileOperation,libraryIsBusy} from './file-library.mjs';
+import {MAX_BYTES} from './limits.mjs';
 import JSZip from 'jszip';
 import {mergeFiles,mergeFilesToBytes,clearMergedDownload} from './merge-ui.mjs';
 import {calculateYieldFile} from './yield-ui.mjs';
@@ -19,51 +21,49 @@ function saveDownload(url,name){const a=document.createElement('a');a.href=url;a
 function error(e){$('message').textContent=e.message;$('message').className='warn'}
 
 async function query(fulltext=false){
- $('message').textContent='';const q=$('query').value.trim();if(!q)return;
+ $('message').textContent='';const q=$('query').value.trim();if(!q)return;$('searchResults').replaceChildren();
  try{if(fulltext){const rows=await call('search',{query:q});$('searchResults').innerHTML='<p>文字搜尋顯示最多 100 列，不會自動補值。</p>'+table(['機種','IC','產品系列','料號','來源'],rows.map(r=>[esc(r.model),esc(r.ic),esc(r.family),esc(r.parts.join('、')),esc(r.sheet)+' · 第 '+r.row_number+' 列']));}
  else{const r=await call('query',{query:q,kind:$('kind').value});$('searchResults').innerHTML='<p class="'+(r['狀態']==='唯一匹配'?'ok':'warn')+'">'+esc(r['狀態'])+'</p>'+candidates(r['候選']);}}catch(e){error(e)}
 }
 $('queryForm').onsubmit=e=>{e.preventDefault();query()};$('fulltext').onclick=()=>query(true);
 $('match').onclick=async()=>{
  const files=Array.from($('file').files);if(!files.length){error(Error('請先選擇檔案。'));return;}
- $('match').disabled=true;$('file').disabled=true;clearDownload();$('uploadResults').innerHTML='';$('message').className='';
+ if(!beginFileOperation())return;$('match').disabled=true;$('file').disabled=true;clearDownload();$('uploadResults').innerHTML='';$('message').className='';
  const used=new Set();let failed=0,total=0;const reports=[];
  try{
  for(let index=0;index<files.length;index++){
   const file=files[index];$('message').textContent=`正在處理 ${index+1}/${files.length}：${file.name}`;
   try{
-   if(file.size>20*1024*1024)throw Error('檔案超過 20 MB。');
+   if(file.size>MAX_BYTES)throw Error('檔案超過 100 MB。');
    const bytes=await file.arrayBuffer();const r=await call('match',{bytes,filename:file.name},[bytes]);
-   const counts={};for(const row of r['結果'])counts[row['狀態']]=(counts[row['狀態']]||0)+1;
-   const summary='完成 '+r['筆數']+' 筆：'+Object.entries(counts).map(([k,v])=>k+' '+v+' 筆').join('、')+(r['提示'].length?'\n'+r['提示'].join('\n'):'');
-   total+=r['筆數'];let button='';
+   const summary='完成 '+r['筆數']+' 筆：'+Object.entries(r.counts).map(([k,v])=>k+' '+v+' 筆').join('、');
+   total+=r['筆數'];
    if(r['筆數']){
     $('message').textContent=`正在準備下載 ${index+1}/${files.length}：${file.name}`;
     const output=await call('export');const base=file.name.replace(/\.(xlsx|csv)$/i,'')+'_IC機種';let name=base+'.xlsx',suffix=2;
     while(used.has(name.toLowerCase()))name=base+'_'+suffix+++'.xlsx';used.add(name.toLowerCase());
-    const blob=new Blob([output],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const blob=new File([output],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const item={name,blob,url:URL.createObjectURL(blob),detail:r.detail};downloads.push(item);
-    button='<button type="button" data-download="'+(downloads.length-1)+'" class="secondary">下載此檔結果</button>';
+    await addLibraryFile(blob,{kind:'matched',detail:r.detail,rows:r['筆數'],sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});
    }
-   reports.push('<section><h3>'+esc(file.name)+'</h3><p style="white-space:pre-wrap">'+esc(summary)+'</p>'+button+table(['分頁／列號','狀態','機種','IC','候選與來源'],r['結果'].slice(0,200).map(i=>[esc(i['分頁'])+' / '+i['列號'],esc(i['狀態']),esc(i['機種']),esc(i.IC),candidates(i['候選'])]))+(r['筆數']>200?'<p>畫面顯示前 200 筆，下載包含全部結果。</p>':'')+'</section>');
    if(files.length===1)$('message').textContent=summary;
-  }catch(e){failed++;reports.push('<section><h3>'+esc(file.name)+'</h3><p class="warn">'+esc(e.message)+'</p></section>');if(files.length===1)error(e);}
-  $('uploadResults').innerHTML=reports.join('');
+  }catch(e){failed++;reports.push(file.name+'：'+e.message);if(files.length===1)error(e);}
+  $('uploadResults').replaceChildren();if(reports.length){$('message').textContent=reports.join('；');$('message').className='warn';}
  }
  if(downloads.length>1){
   $('message').textContent='正在打包全部下載檔…';const zip=new JSZip();for(const d of downloads)zip.file(d.name,await d.blob.arrayBuffer());
   downloadUrl=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'}));
  }
  $('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
- if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案。`;
+ if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案。`+(reports.length?' '+reports.join('；'):'');
  }catch(e){error(e);$('export').disabled=!downloads.length;}
- finally{$('match').disabled=false;$('file').disabled=false;}
+ finally{$('match').disabled=false;$('file').disabled=false;endFileOperation();}
 };
 $('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)),{matched:true});
 $('autoAnalyze').onclick=async()=>{
  const files=Array.from($('file').files);if(!files.length){error(Error('請先選擇含 Detail 分頁的 Excel。'));return;}
  if(files.length>30||files.some(f=>!f.name.toLowerCase().endsWith('.xlsx'))||files.reduce((n,f)=>n+f.size,0)>100*1024*1024){error(Error('一鍵流程支援 1 至 30 份 .xlsx，原始檔合計 100 MB 以內。'));return;}
- const button=$('autoAnalyze');button.disabled=true;$('match').disabled=true;$('mergeMatched').disabled=true;$('file').disabled=true;$('export').disabled=true;
+ if(!beginFileOperation())return;const button=$('autoAnalyze');button.disabled=true;$('match').disabled=true;$('mergeMatched').disabled=true;$('file').disabled=true;$('export').disabled=true;
  if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;
  $('uploadResults').replaceChildren();$('matchedMergeResult').hidden=true;$('autoResult').hidden=true;$('message').className='';
  try{
@@ -73,19 +73,21 @@ $('autoAnalyze').onclick=async()=>{
    const bytes=await files[i].arrayBuffer();const result=await call('match',{bytes,filename:files[i].name},[bytes]);
    if(!result.detail)throw Error(`${files[i].name} 沒有可合併的 Detail 分頁；請選擇 Detail 格式的 .xlsx。`);
    $('message').textContent=`一鍵處理：整理比對結果 ${i+1}/${files.length}…`;
-   const output=await call('export');matched.push(new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx')));
+   const output=await call('export'),file=new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx'));matched.push(file);await addLibraryFile(file,{kind:'matched',sources:[{name:files[i].name,size:files[i].size,kind:'Detail'}],rows:result['筆數']});
   }
   $('message').textContent='一鍵處理：合併並依網站規則去重…';
   const merged=await mergeFilesToBytes(matched,msg=>{$('message').textContent='一鍵處理：'+msg;});
   const mergedFile=new File([merged.bytes],merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  await addLibraryFile(mergedFile,{kind:'merged',sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'})),rows:merged.output_rows});
   $('message').textContent='一鍵處理：計算每日階段良率與不良分析…';
   const report=await calculateYieldFile(mergedFile,msg=>{$('message').textContent='一鍵處理：'+msg;},{sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
+  await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});
   if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;
   renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks);
-  $('message').textContent='一鍵流程完成。中間比對與合併結果不顯示；完整報表已備妥，可點擊下載。';$('message').className='ok';
+  $('message').textContent='一鍵流程完成。所有產出檔案已加入清單；完整報表可點擊下載。';$('message').className='ok';
  }catch(e){$('message').textContent=e.message;$('message').className='warn';}
- finally{button.disabled=false;$('match').disabled=false;$('file').disabled=false;$('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;}
+ finally{button.disabled=false;$('match').disabled=false;$('file').disabled=false;$('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;endFileOperation();}
 };
 $('uploadResults').onclick=e=>{const button=e.target.closest('[data-download]');if(!button)return;const d=downloads[Number(button.dataset.download)];if(d)saveDownload(d.url,d.name);};
 $('file').onchange=()=>{clearDownload();$('uploadResults').innerHTML='';$('export').textContent='匯出 Excel';$('message').textContent='已選擇 '+$('file').files.length+' 個檔案，請點「開始比對」。';};
@@ -117,9 +119,14 @@ databaseWorker.onmessage=({data})=>{if(data.progress){$('databaseStatus').textCo
 databaseWorker.onerror=()=>{for(const p of databasePending.values())p.reject(Error('瀏覽器資料庫工具載入失敗，請重新整理再試。'));databasePending.clear();};
 function databaseCall(type,file){return new Promise((resolve,reject)=>{const id=++databaseId;databasePending.set(id,{resolve,reject});databaseWorker.postMessage({id,type,file});});}
 $('databaseUpload').onclick=async()=>{
- const file=$('databaseFile').files[0];if(!file){$('databaseStatus').textContent='請先選擇原始對照 Excel。';return;}
- const controls=['databaseUpload','databaseClear','databaseDownload','databaseFile','lookup','match','fulltext','file','export'];const before=controls.map(id=>$(id).disabled);controls.forEach(id=>$(id).disabled=true);
- try{const {summary,reference}=await databaseCall('upload',file);if(reference){await call('reload',{reference});applyDatabaseStats(await call('stats'));}clearDownload();$('uploadResults').innerHTML='';$('searchResults').innerHTML='';databaseChannel?.postMessage('changed');$('databaseStatus').textContent=summary.unchanged?'沒有新對照，既有資料庫未變更。':`已儲存在本瀏覽器：新增 ${summary.added_records} 筆，跳過重複 ${summary.skipped_records} 筆。重新整理後仍保留，可下載更新後 SQLite。`;}catch(e){$('databaseStatus').textContent=e.message;}finally{controls.forEach((id,i)=>$(id).disabled=before[i]);$('export').disabled=true;}
+ const files=Array.from($('databaseFile').files);if(!files.length){$('databaseStatus').textContent='請先選擇原始對照 Excel。';return;}
+ if(!beginFileOperation())return;const controls=['databaseUpload','databaseClear','databaseDownload','databaseFile','lookup','match','fulltext','file','export','autoAnalyze','libraryMerge','libraryAnalyze'];const before=controls.map(id=>$(id).disabled);controls.forEach(id=>$(id).disabled=true);
+ try{let added=0,skipped=0,success=0,unchanged=0;const failures=[];
+  for(let i=0;i<files.length;i++){try{$('databaseStatus').textContent=`正在匯入 ${i+1}/${files.length}：${files[i].name}`;const {summary,reference}=await databaseCall('upload',files[i]);if(reference){await call('reload',{reference});applyDatabaseStats(await call('stats'));}added+=summary.added_records||0;skipped+=summary.skipped_records||0;success++;if(summary.unchanged)unchanged++;}catch(error){failures.push(files[i].name+'：'+error.message);}}
+  clearDownload();$('uploadResults').replaceChildren();$('searchResults').replaceChildren();if(success)databaseChannel?.postMessage('changed');
+  $('databaseStatus').textContent=(success?(success===unchanged?'沒有新對照，既有資料庫未變更。':`已儲存在本瀏覽器：新增 ${added} 筆，跳過重複 ${skipped} 筆。`):'')+(files.length>1?` 成功 ${success} 份，失敗 ${failures.length} 份。`:'')+(failures.length?' '+failures.join('；'):'');
+ }catch(e){$('databaseStatus').textContent=e.message;}finally{controls.forEach((id,i)=>$(id).disabled=before[i]);$('export').disabled=true;endFileOperation();}
+
 };
 $('databaseDownload').onclick=async()=>{try{const bytes=await databaseCall('download');if(databaseDownloadUrl)URL.revokeObjectURL(databaseDownloadUrl);databaseDownloadUrl=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.sqlite3'}));saveDownload(databaseDownloadUrl,'AutoReport_瀏覽器資料庫.sqlite3');}catch(e){$('databaseStatus').textContent=e.message;}};
 
@@ -127,10 +134,10 @@ const databaseChannel=typeof BroadcastChannel==='function'?new BroadcastChannel(
 function clearDatabaseResults(){clearDownload();$('uploadResults').innerHTML='';$('searchResults').innerHTML='';if(databaseDownloadUrl){URL.revokeObjectURL(databaseDownloadUrl);databaseDownloadUrl=null;}}
 if(databaseChannel)databaseChannel.onmessage=async({data})=>{if(data==='cleared'){for(const input of document.querySelectorAll('input[type=file]'))input.value='';location.reload();return;}try{await call('refresh');applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseStatus').textContent='另一個分頁已更新資料庫，已同步最新資料。';}catch(e){$('databaseStatus').textContent=e.message;}};
 $('databaseClear').onclick=async()=>{
- if(!confirm('確定清空本瀏覽器資料庫？所有對照及匯入清單將刪除，無法復原。建議先下載 SQLite 備份。'))return;
- const controls=['databaseClear','databaseUpload','databaseDownload','databaseFile','lookup','match','fulltext','file','export'];
+ if(libraryIsBusy())return;if(!confirm('確定清空本瀏覽器資料庫？所有對照及匯入清單將刪除，無法復原。建議先下載 SQLite 備份。'))return;
+ if(!beginFileOperation())return;const controls=['databaseClear','databaseUpload','databaseDownload','databaseFile','lookup','match','fulltext','file','export'];
  const before=controls.map(id=>$(id).disabled);controls.forEach(id=>$(id).disabled=true);
- try{await databaseCall('clear');clearDatabaseResults();for(const input of document.querySelectorAll('input')){if(input.type==='file'||input.type==='text')input.value='';}databaseChannel?.postMessage('cleared');location.reload();}
+ try{await databaseCall('clear');await clearFileLibrary();clearDatabaseResults();for(const input of document.querySelectorAll('input')){if(input.type==='file'||input.type==='text')input.value='';}databaseChannel?.postMessage('cleared');location.reload();}
  catch(e){$('databaseStatus').textContent=e.message;}
- finally{controls.forEach((id,i)=>$(id).disabled=before[i]);$('export').disabled=!downloads.length;}
+ finally{controls.forEach((id,i)=>$(id).disabled=before[i]);$('export').disabled=!downloads.length;endFileOperation();}
 };
