@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const hash=createHash('sha256');
-for(const file of ['web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','threshold-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/threshold-ui.mjs','web/index.html','browser-storage.js','browser-db-worker.js','autoreport.py','web/update_database.py'])hash.update(await readFile(file));
+for(const file of ['web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','threshold-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/chart-export.mjs','web/threshold-ui.mjs','web/index.html','browser-storage.js','browser-db-worker.js','autoreport.py','web/update_database.py'])hash.update(await readFile(file));
 const buildId=hash.digest('hex').slice(0,12);
 await rm('dist',{recursive:true,force:true});await mkdir('dist/assets',{recursive:true});
 execFileSync(existsSync('.venv/bin/python')?'.venv/bin/python':'python',['web/export_reference.py','dist/reference.json']);
