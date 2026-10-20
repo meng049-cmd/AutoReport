@@ -96,6 +96,8 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.match(await page.locator('#qualityGlobalDefects').innerText(),/加總 1 不良片 ÷ 2 總片＝50.00%/);
   const [qualityDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
   const qualityOutput=new ExcelJS.Workbook();await qualityOutput.xlsx.readFile(await qualityDownload.path());
+  assert.equal(qualityOutput.getWorksheet('Detail').state,'hidden');assert.equal(qualityOutput.getWorksheet('計算明細').state,'hidden');
+  assert.deepEqual(qualityOutput.worksheets.filter(sheet=>sheet.state==='visible').map(sheet=>sheet.name),['每日製程良率','每日階段良率','品質總覽','產品總良率','製程總良率','不良分析','PPID對照衝突','統計說明']);
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('B2').value,2);
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('F2').value,.5);
   assert.equal(qualityOutput.getWorksheet('產品總良率').getCell('F1').value,'產品總良率（日期×階段算術平均）');
