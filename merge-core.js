@@ -9,13 +9,15 @@
   }
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
   class DetailMerger {
-    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.defectKeys = new Set(); }
+    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
     static readBook(XLSX,bytes) {
       const names=XLSX.read(bytes,{type:'array',bookSheets:true}).SheetNames.filter(name=>name.trim().toLowerCase()==='detail');
       if(names.length!==1)throw Error('找不到唯一的 Detail 分頁。');
       return XLSX.read(bytes,{type:'array',dense:true,sheets:names[0]});
     }
     add(book, filename) {
+      let sourceNames;try{const saved=JSON.parse(book.Custprops?.AutoReportSources||'null');if(Array.isArray(saved)&&saved.length&&saved.every(name=>typeof name==='string'&&name.trim()))sourceNames=saved;}catch{}
+      for(const name of sourceNames||[filename])this.sources.add(name);
       const XLSX = this.XLSX;
       const names = book.SheetNames.filter(name => name.trim().toLowerCase() === 'detail');
       if (names.length !== 1) throw new Error(`${filename}：找不到唯一的 Detail 分頁。`);
@@ -80,6 +82,7 @@
       }
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Detail');
       book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect]),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
+      book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, start_date: first, end_date: last};
     }
   }

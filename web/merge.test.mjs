@@ -47,3 +47,8 @@ test('daily report reader parses only Detail and retains metadata without unrela
  assert.ok(selected.Sheets.Detail);assert.equal(selected.Sheets.OldReport,undefined);
  const m=new DetailMerger(XLSX);m.add(selected,'master.xlsx');assert.equal(m.finish().output_rows,1);
 });
+test('original Chinese source filenames survive merge download and report reload',()=>{
+ const merger=new DetailMerger(XLSX);merger.add(book([row('A',5,'GOOD')]),'W39工單明細.xlsx');merger.add(book([row('B',6,'FAIL','bad')]),'W40工單明細.xlsx');
+ const output=merger.finish().book,again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(output,{type:'array',bookType:'xlsx'})),'合併主檔.xlsx');
+ assert.deepEqual([...again.sources],['W39工單明細.xlsx','W40工單明細.xlsx']);
+});

@@ -29,6 +29,7 @@ test('one PPID with contradictory products is counted once and explicitly pendin
 test('cross-station and cross-day observations with blank mappings never increase total PPID quantity',()=>{
  const rows=[row('ppid','P1','GOOD',null),row('ppid','P2','FAIL','bad',6,''),row('ppid','P1','GOOD',null,7),row('second','P1','GOOD',null)];rows[1][10]='';
  const a=analyze(rows);assert.equal(a.total,2);assert.equal(a.fail,1);assert.equal(a.products.length,1);assert.equal(a.products[0].total,2);assert.equal(a.badRate,.5);assert.equal(a.defects[0].rate,.5);assert.equal(a.processes.find(p=>p.process==='P1').total,2);
+ const alias=analyze([row('alias','DAF外觀','GOOD',null),row('alias','DAF外觀檢查','FAIL','bad')]);assert.equal(alias.dailyProcessTotals.get(JSON.stringify([alias.products[0].id,'2026-10-05','DAF外觀'])),1,'canonical process aliases cannot double-count the same input PPID');
 });
 
 test('FAIL takes priority over GOOD defects and every PPID is counted once',()=>{

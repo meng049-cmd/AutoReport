@@ -16,3 +16,11 @@ test('editable stage-yield workbook includes native combo chart and preserves bl
  assert.match(await zip.file('xl/drawings/_rels/drawing1.xml.rels').async('string'),/relationships\/chart/);
  const lowBytes=await createStageChartWorkbook(stage,[{date:'2026-10-15',value:.5}]),lowZip=await JSZip.loadAsync(lowBytes);assert.match(await lowZip.file('xl/charts/chart1.xml').async('string'),/<c:min val="0\.5"\/>/);
 });
+test('native chart and plotted PNG snapshot coexist with notes and source files',async()=>{
+ const snapshot='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+ const bytes=await createStageChartWorkbook({title:'前段',target:.985,color:'#d54545'},[{date:'2026-10-05',value:.99}],{snapshot,sources:[{name:'來源.xlsx',size:123}],referenceSources:['對照.xlsx']});
+ const zip=await JSZip.loadAsync(bytes);assert.ok(Object.keys(zip.files).some(name=>/^xl\/media\/image\d+\.png$/.test(name)));
+ const nativeDrawing=await zip.file('xl/drawings/drawing2.xml').async('string');assert.match(nativeDrawing,/<c:chart/);assert.match(await zip.file('xl/drawings/drawing1.xml').async('string'),/<xdr:pic>/);assert.doesNotMatch(await zip.file('xl/drawings/drawing1.xml').async('string'),/<xdr:oneCellAnchor[^>]*editAs/);
+ assert.doesNotMatch(await zip.file('xl/charts/chart1.xml').async('string'),/val="#d54545"/);
+ const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);assert.ok(book.getWorksheet('已產生圖表'));assert.ok(book.getWorksheet('統計說明'));assert.equal(book.getWorksheet('資料來源').getCell('B2').value,'來源.xlsx');assert.equal(book.getWorksheet('資料來源').getCell('B3').value,'對照.xlsx');assert.equal(book.getWorksheet('已產生圖表').getImages().length,1);
+});

@@ -1,10 +1,11 @@
 import {clearQuality,renderQuality} from './quality-ui.mjs';
+import {getReferenceSources} from './report-context.mjs';
 const $=id=>document.getElementById(id);let downloadUrl,worker;
-export function calculateYieldFile(file,onProgress=()=>{}){
+export function calculateYieldFile(file,onProgress=()=>{},context={}){
  return new Promise((resolve,reject)=>{
   const w=new Worker(new URL('../yield-worker.js?v='+__BUILD_ID__,import.meta.url));
   w.onmessage=({data})=>{if(data.type==='progress'){onProgress(data.message);return;}w.terminate();if(data.type==='error')reject(Error(data.message));else resolve(data);};
-  w.onerror=()=>{w.terminate();reject(Error('瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。'));};w.postMessage(file);
+  w.onerror=()=>{w.terminate();reject(Error('瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。'));};w.postMessage({file,referenceSources:getReferenceSources(),...context});
  });
 }
 function clear(){clearQuality();if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;$('yieldResult').hidden=true;$('yieldMessage').textContent='';$('thresholdDashboard').hidden=true;}
@@ -24,6 +25,6 @@ $('yieldCalculate').onclick=()=>{
   renderQuality(data.analysis,data.start_date,data.end_date,data.stageChecks);$('thresholdDashboard').hidden=true;
   $('yieldResult').hidden=false;done();
  };
- worker.onerror=()=>{$('yieldMessage').textContent='瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。';done();};worker.postMessage(file);
+ worker.onerror=()=>{$('yieldMessage').textContent='瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。';done();};worker.postMessage({file,referenceSources:getReferenceSources()});
  }catch(error){$('yieldMessage').textContent=error.message;done();}
 };

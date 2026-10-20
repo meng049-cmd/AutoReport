@@ -44,7 +44,7 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
  assert.equal(await page.locator('#orderCount').innerText(),'0');assert.equal(await page.locator('#pairCount').innerText(),'0');
  assert.equal(await page.locator('#export').isDisabled(),true);
- assert.equal(await page.locator('#uploadedFilesStatus').innerText(),'尚無匯入資料。');
+ await page.locator('.imported-files summary').click();assert.equal(await page.locator('#uploadedFilesStatus').innerText(),'尚無匯入資料。');
  for(const target of [page,other]){
   await target.waitForFunction(()=>document.querySelector('#databaseStatus')?.textContent.startsWith('已清空本瀏覽器資料庫'));
   assert.equal(await target.locator('#databaseMetrics').isHidden(),true);
