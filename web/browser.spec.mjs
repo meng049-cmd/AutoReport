@@ -68,6 +68,12 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.deepEqual(mergedMatchedBook.worksheets.map(s=>s.name),['Detail']);
   assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('J2').value,'Goodix');
   assert.equal(mergedMatchedBook.getWorksheet('Detail').getCell('K2').value,'Taroko 14');
+  await page.locator('#file').setInputFiles({name:'auto-detail.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await detailBook.xlsx.writeBuffer())});
+  await page.locator('#autoAnalyze').click();await page.waitForFunction(()=>!document.querySelector('#autoResult').hidden||document.querySelector('#message').className==='warn',{},{timeout:30000});assert.equal(await page.locator('#message').getAttribute('class'),'ok',await page.locator('#message').innerText());
+  assert.equal(await page.locator('#uploadResults').innerText(),'');assert.match(await page.locator('#message').innerText(),/中間比對與合併結果不顯示/);
+  const [autoDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#autoDownload').click()]);
+  const autoBook=new ExcelJS.Workbook();await autoBook.xlsx.readFile(await autoDownload.path());assert.ok(autoBook.getWorksheet('不良分析'));
+  assert.equal(autoDownload.suggestedFilename(),'2026_w41_1011-1011_每日良率_不良分析.xlsx');
   await page.locator('#yieldFile').setInputFiles({name:'master.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile(await mergedMatch.path())});
   await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
   const [yieldDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
@@ -80,8 +86,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(yieldBook.getWorksheet('品質總覽').getCell('B2').value,1);
   assert.equal(await page.locator('#qualityDashboard').isVisible(),true);
   await page.locator('#qualityProduct').selectOption({label:'Goodix／Taroko 14'});
-  assert.match(await page.locator('#qualityProducts').innerText(),/產品總良率.*—/s);
-  assert.match(await page.locator('#qualityProductDefects').innerText(),/加總 0 不良片/);
+  assert.equal(await page.locator('#stage-SMT').count(),1);
   const qualityFixture=new ExcelJS.Workbook();await qualityFixture.xlsx.load(await mergedMatchedBook.xlsx.writeBuffer());
   const qualityDetail=qualityFixture.getWorksheet('Detail');qualityDetail.getCell('H2').value='第一筆不良項目';qualityDetail.getCell('I2').value='GOOD';
   const otherFailure=qualityDetail.getRow(2).values.slice(1);otherFailure[0]='第二製程';otherFailure[5]=new Date('2026-10-12');otherFailure[7]='其他不良';otherFailure[8]='FAIL';qualityDetail.addRow(otherFailure);
@@ -92,8 +97,9 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   const goodUnit=qualityDetail.getRow(2).values.slice(1);goodUnit[4]='second-unit';goodUnit[7]=null;goodUnit[8]='GOOD';qualityDetail.addRow(goodUnit);
   await page.locator('#yieldFile').setInputFiles({name:'quality.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await qualityFixture.xlsx.writeBuffer())});
   await page.locator('#yieldCalculate').click();await page.locator('#qualityDashboard').waitFor({state:'visible'});
-  assert.match(await page.locator('#qualityMetrics').innerText(),/50.00%/);
-  assert.match(await page.locator('#qualityGlobalDefects').innerText(),/加總 1 不良片 ÷ 2 總片＝50.00%/);
+  assert.match(await page.locator('#qualityMetrics').innerText(),/50.0%/);
+  assert.equal(await page.locator('canvas').count(),3);
+  const [chartPng]=await Promise.all([page.waitForEvent('download'),page.locator('#download-前段').click()]);assert.match(chartPng.suggestedFilename(),/前段_每日階段良率\.png/);
   const [qualityDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
   const qualityOutput=new ExcelJS.Workbook();await qualityOutput.xlsx.readFile(await qualityDownload.path());
   assert.equal(qualityOutput.getWorksheet('Detail').state,'hidden');assert.equal(qualityOutput.getWorksheet('計算明細').state,'hidden');
@@ -110,18 +116,12 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
   const [reanalysis]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
   const reloaded=new ExcelJS.Workbook();await reloaded.xlsx.readFile(await reanalysis.path());assert.equal(reloaded.getWorksheet('不良分析').getCell('E5').value,'其他不良');
-  assert.equal(await page.locator('#thresholdDashboard').isVisible(),true);
-  await page.locator('#qualityGlobalChart button').first().click();
-  assert.match(await page.locator('#qualitySelection').innerText(),/其他不良/);
-  assert.match(await page.locator('#qualityLinkedDetails').innerText(),/其他不良/);
-  assert.equal(await page.locator('#qualityLinkedPPID tbody tr').count(),1);
-  await page.locator('#qualityProductChart button').first().click();assert.notEqual(await page.locator('#qualityProduct').inputValue(),'');
-  assert.ok(await page.locator('#qualityGlobalChart button').count()<=5);assert.ok(await page.locator('#qualityChart button').count()<=5);
+  assert.equal(await page.locator('#thresholdDashboard').isVisible(),false);
+  assert.equal(await page.locator('#qualityDashboard').isVisible(),true);
   const lowMaster=new ExcelJS.Workbook(),lowSheet=lowMaster.addWorksheet('Detail');lowSheet.addRow(['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種']);
   lowSheet.addRow(['DAF外觀','o','p','n','low-a',new Date('2026-10-05'),'op','偏移','FAIL','Goodix','Model']);lowSheet.addRow(['DAF外觀','o','p','n','low-b',new Date('2026-10-05'),'op',null,'GOOD','Goodix','Model']);
-  await page.locator('#yieldFile').setInputFiles({name:'low.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await lowMaster.xlsx.writeBuffer())});await page.locator('#yieldCalculate').click();await page.locator('#thresholdDashboard').waitFor({state:'visible'});
-  assert.match(await page.locator('#thresholdSummary').innerText(),/1 組/);await page.locator('#thresholdChart button').click();assert.equal(await page.locator('#thresholdStage').inputValue(),'前段');assert.match(await page.locator('#thresholdTable').innerText(),/偏移/);
-  const [lowDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);const lowOutput=new ExcelJS.Workbook();await lowOutput.xlsx.readFile(await lowDownload.path());assert.equal(lowOutput.getWorksheet('未達標分析'),undefined);assert.equal(lowOutput.getWorksheet('全產品不良項目占比'),undefined);assert.equal(lowOutput.getWorksheet('不良分析').getCell('G5').value,1);assert.equal(lowOutput.getWorksheet('不良分析').getCell('I5').value,.5);assert.match(await page.locator('#defectCompositionTable').innerText(),/占製程投入數的不良比例/);
+  await page.locator('#yieldFile').setInputFiles({name:'low.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await lowMaster.xlsx.writeBuffer())});await page.locator('#yieldCalculate').click();await page.locator('#qualityDashboard').waitFor({state:'visible'});assert.equal(await page.locator('#thresholdDashboard').isVisible(),false);
+  const [lowDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);const lowOutput=new ExcelJS.Workbook();await lowOutput.xlsx.readFile(await lowDownload.path());assert.equal(lowOutput.getWorksheet('未達標分析'),undefined);assert.equal(lowOutput.getWorksheet('全產品不良項目占比'),undefined);assert.equal(lowOutput.getWorksheet('不良分析').getCell('G5').value,1);assert.equal(lowOutput.getWorksheet('不良分析').getCell('I5').value,.5);
 
 
 
@@ -138,9 +138,10 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(dedupBook.getWorksheet('Detail').rowCount,2);
   assert.equal(dedupBook.getWorksheet('Detail').getCell('I2').value,'FAIL');
   assert.equal(dedupBook.getWorksheet('Detail').getCell('H2').value,'不良');
+  await page.locator('#file').setInputFiles({name:'detail-again.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await detailBook.xlsx.writeBuffer())});await page.locator('#match').click();await page.waitForFunction(()=>document.querySelector('#message').textContent.startsWith('完成'));
   const preparedExports=await page.evaluate(()=>window.exportRequests);
   const [again]=await Promise.all([page.waitForEvent('download'),page.locator('#export').click()]);
-  assert.equal(again.suggestedFilename(),'Detail_IC機種.xlsx');
+  assert.equal(again.suggestedFilename(),'detail-again_IC機種.xlsx');
   assert.equal(await page.evaluate(()=>window.exportRequests),preparedExports,'download clicks must use the prepared file without an asynchronous worker request');
   assert.equal(await page.locator('#message').evaluate(el=>el.closest('.panel')?.querySelector('#export')!==null),true,'download feedback is next to the upload controls');
   await page.locator('#file').setInputFiles({name:'new.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nmissing\n')});

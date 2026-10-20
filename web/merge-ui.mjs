@@ -1,5 +1,13 @@
 const $=id=>document.getElementById(id);
 let downloadUrl,activeWorker;
+export function mergeFilesToBytes(files,onProgress=()=>{}){
+ return new Promise((resolve,reject)=>{
+  const worker=new Worker(new URL('../merge-worker.js?v='+__BUILD_ID__,import.meta.url));
+  worker.onmessage=({data})=>{if(data.type==='progress'){onProgress(data.message);return;}worker.terminate();if(data.type==='error')reject(Error(data.message));else resolve(data);};
+  worker.onerror=()=>{worker.terminate();reject(Error('瀏覽器無法完成合併，請減少檔案或使用桌面版 Chrome／Edge。'));};
+  worker.postMessage(files);
+ });
+}
 export function clearMergedDownload(){
  if(downloadUrl)URL.revokeObjectURL(downloadUrl);
  downloadUrl=null;$('mergeResult').hidden=true;$('matchedMergeResult').hidden=true;$('mergeMessage').textContent='';$('matchedMergeMessage').textContent='';for(const id of ['mergeDownload','matchedMergeDownload'])$(id).removeAttribute('href');
@@ -23,13 +31,10 @@ export function mergeFiles(files,{matched=false}={}){
    if(data.type==='error'){fail(data.message);return;}
    downloadUrl=URL.createObjectURL(new Blob([data.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
    const link=$('mergeDownload');link.href=downloadUrl;link.download=data.filename;link.textContent='下載 '+data.filename;
-   const stats=$('mergeStats');stats.replaceChildren();
-   for(const [label,value] of [['原始筆數',data.input_rows],['移除重複',data.removed_rows],['保留筆數',data.output_rows]]){
-    const div=document.createElement('div');div.className='metric';const strong=document.createElement('strong');strong.textContent=value.toLocaleString();const span=document.createElement('span');span.textContent=label;div.append(strong,span);stats.append(div);
-   }
+   $('mergeStats').replaceChildren();
    $('mergeResult').hidden=false;
    if(matched){const inline=$('matchedMergeDownload');inline.href=downloadUrl;inline.download=data.filename;inline.textContent='下載合併後的 Detail：'+data.filename;$('matchedMergeResult').hidden=false;}
-   message(`合併完成：${data.start_date} 至 ${data.end_date}。點選下方連結下載。`);finish();
+   message('合併完成，可點擊下載連結取得檔案。');finish();
   };
   activeWorker.onerror=()=>fail('瀏覽器無法完成合併，請減少檔案或使用桌面版 Chrome／Edge。');
   message('正在合併 Detail，完成後會顯示下載連結…');activeWorker.postMessage(files);

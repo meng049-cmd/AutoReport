@@ -1,7 +1,13 @@
-import {clearThresholds,renderThresholds} from './threshold-ui.mjs';
 import {clearQuality,renderQuality} from './quality-ui.mjs';
 const $=id=>document.getElementById(id);let downloadUrl,worker;
-function clear(){clearQuality();clearThresholds();if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;$('yieldResult').hidden=true;$('yieldMessage').textContent='';}
+export function calculateYieldFile(file,onProgress=()=>{}){
+ return new Promise((resolve,reject)=>{
+  const w=new Worker(new URL('../yield-worker.js?v='+__BUILD_ID__,import.meta.url));
+  w.onmessage=({data})=>{if(data.type==='progress'){onProgress(data.message);return;}w.terminate();if(data.type==='error')reject(Error(data.message));else resolve(data);};
+  w.onerror=()=>{w.terminate();reject(Error('瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。'));};w.postMessage(file);
+ });
+}
+function clear(){clearQuality();if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;$('yieldResult').hidden=true;$('yieldMessage').textContent='';$('thresholdDashboard').hidden=true;}
 $('yieldFile').onchange=clear;
 $('yieldCalculate').onclick=()=>{
  if(worker)return;clear();const file=$('yieldFile').files[0];
@@ -14,9 +20,8 @@ $('yieldCalculate').onclick=()=>{
   if(data.type==='error'){$('yieldMessage').textContent=data.message;done();return;}
   downloadUrl=URL.createObjectURL(new Blob([data.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('yieldDownload');link.href=downloadUrl;link.download=data.filename;link.textContent='下載 '+data.filename;
-  $('yieldMessage').textContent=`完成 ${data.product_count} 個 IC＋機種組合、${data.date_count} 天，共 ${data.output_rows.toLocaleString()} 筆資料；移除 ${data.removed_rows} 筆重複。日期：${data.start_date} 至 ${data.end_date}。`;
-  if(data.missing_product_rows)$('yieldMessage').textContent+=` 另有 ${data.missing_product_rows.toLocaleString()} 筆 IC／機種缺漏，已標記待補並列於「待補產品資料」，未猜測產品。`;
-  renderQuality(data.analysis,data.start_date,data.end_date);renderThresholds(data.thresholds);
+  $('yieldMessage').textContent='分析完成，報表已備妥，可點擊下載。';
+  renderQuality(data.analysis,data.start_date,data.end_date,data.stageChecks);$('thresholdDashboard').hidden=true;
   $('yieldResult').hidden=false;done();
  };
  worker.onerror=()=>{$('yieldMessage').textContent='瀏覽器無法完成計算，請使用桌面版 Chrome／Edge 或縮小主檔。';done();};worker.postMessage(file);

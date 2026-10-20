@@ -13,5 +13,5 @@ self.onmessage=async({data:file})=>{try{
  self.postMessage({type:'progress',message:'分析完成，正在產生 Excel 下載檔…'});
  book.Workbook={...book.Workbook,Sheets:book.SheetNames.map(name=>({name,Hidden:['計算明細','Detail'].includes(name)?1:0}))};
  const bytes=XLSX.write(book,{bookType:'xlsx',type:'array',compression:true});
- self.postMessage({type:'complete',...stats,analysis,thresholds,bytes},[bytes]);
+ self.postMessage({type:'complete',...stats,analysis,thresholds,stageChecks:calculation.stageChecks,bytes},[bytes]);
 }catch(error){self.postMessage({type:'error',message:error.message||'主檔無法處理。'});}};

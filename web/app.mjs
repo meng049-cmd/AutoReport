@@ -1,6 +1,8 @@
 import './yield-ui.mjs';
 import JSZip from 'jszip';
-import {mergeFiles,clearMergedDownload} from './merge-ui.mjs';
+import {mergeFiles,mergeFilesToBytes,clearMergedDownload} from './merge-ui.mjs';
+import {calculateYieldFile} from './yield-ui.mjs';
+import {renderQuality} from './quality-ui.mjs';
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const worker=new Worker(new URL('./worker.js?v='+__BUILD_ID__,import.meta.url),{type:'module'});
@@ -11,7 +13,7 @@ function call(type,payload={},transfer=[]){return new Promise((resolve,reject)=>
 function table(head,rows){return '<div class="scroll"><table><thead><tr>'+head.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
 function sources(items){return '<details><summary>'+items.length+' 筆來源</summary>'+items.map(s=>esc(s['檔案'])+' · '+esc(s['分頁'])+' 第 '+esc(s['列號'])+' 列'+(s['原始IC／機型']?' · 原始 IC／機型：'+esc(s['原始IC／機型']):'')+(s['整理依據']?.length?'<br>'+s['整理依據'].filter(n=>typeof n==='string').map(esc).join('；'):'')).join('<br>')+'</details>'}
 function candidates(items){return items.map(c=>'<b>'+esc(c['機種']||'機種未填')+'</b> / '+esc(c.IC||'未標示')+(c['產品系列'].length?' <span class="badge">'+esc(c['產品系列'].join('、'))+'</span>':'')+sources(c['來源'])).join('<br>')||'—'}
-function clearDownload(){$('mergeMatched').disabled=true;clearMergedDownload();if(downloadUrl)URL.revokeObjectURL(downloadUrl);for(const d of downloads)URL.revokeObjectURL(d.url);downloadUrl=null;downloads=[];$('export').disabled=true;}
+function clearDownload(){$('mergeMatched').disabled=true;clearMergedDownload();$('autoResult').hidden=true;if(downloadUrl)URL.revokeObjectURL(downloadUrl);for(const d of downloads)URL.revokeObjectURL(d.url);downloadUrl=null;downloads=[];$('export').disabled=true;}
 function saveDownload(url,name){const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();}
 function error(e){$('message').textContent=e.message;$('message').className='warn'}
 
@@ -57,6 +59,33 @@ $('match').onclick=async()=>{
  finally{$('match').disabled=false;$('file').disabled=false;}
 };
 $('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)),{matched:true});
+$('autoAnalyze').onclick=async()=>{
+ const files=Array.from($('file').files);if(!files.length){error(Error('請先選擇含 Detail 分頁的 Excel。'));return;}
+ if(files.length>30||files.some(f=>!f.name.toLowerCase().endsWith('.xlsx'))||files.reduce((n,f)=>n+f.size,0)>100*1024*1024){error(Error('一鍵流程支援 1 至 30 份 .xlsx，原始檔合計 100 MB 以內。'));return;}
+ const button=$('autoAnalyze');button.disabled=true;$('match').disabled=true;$('mergeMatched').disabled=true;$('file').disabled=true;$('export').disabled=true;
+ if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;
+ $('uploadResults').replaceChildren();$('matchedMergeResult').hidden=true;$('autoResult').hidden=true;$('message').className='';
+ try{
+  const matched=[];
+  for(let i=0;i<files.length;i++){
+   $('message').textContent=`一鍵處理：比對檔案 ${i+1}/${files.length}…`;
+   const bytes=await files[i].arrayBuffer();const result=await call('match',{bytes,filename:files[i].name},[bytes]);
+   if(!result.detail)throw Error(`${files[i].name} 沒有可合併的 Detail 分頁；請選擇 Detail 格式的 .xlsx。`);
+   $('message').textContent=`一鍵處理：整理比對結果 ${i+1}/${files.length}…`;
+   const output=await call('export');matched.push(new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx')));
+  }
+  $('message').textContent='一鍵處理：合併並依網站規則去重…';
+  const merged=await mergeFilesToBytes(matched,msg=>{$('message').textContent='一鍵處理：'+msg;});
+  const mergedFile=new File([merged.bytes],merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  $('message').textContent='一鍵處理：計算每日階段良率與不良分析…';
+  const report=await calculateYieldFile(mergedFile,msg=>{$('message').textContent='一鍵處理：'+msg;});
+  if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;
+  renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks);
+  $('message').textContent='一鍵流程完成。中間比對與合併結果不顯示；完整報表已備妥，可點擊下載。';$('message').className='ok';
+ }catch(e){$('message').textContent=e.message;$('message').className='warn';}
+ finally{button.disabled=false;$('match').disabled=false;$('file').disabled=false;$('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;}
+};
 $('uploadResults').onclick=e=>{const button=e.target.closest('[data-download]');if(!button)return;const d=downloads[Number(button.dataset.download)];if(d)saveDownload(d.url,d.name);};
 $('file').onchange=()=>{clearDownload();$('uploadResults').innerHTML='';$('export').textContent='匯出 Excel';$('message').textContent='已選擇 '+$('file').files.length+' 個檔案，請點「開始比對」。';};
 $('export').onclick=()=>{
