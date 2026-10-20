@@ -99,17 +99,16 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('B2').value,2);
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('F2').value,.5);
   assert.equal(qualityOutput.getWorksheet('產品總良率').getCell('F1').value,'產品總良率（日期×階段算術平均）');
-  assert.equal(qualityOutput.getWorksheet('全產品不良排名').rowCount,2);
-  assert.equal(qualityOutput.getWorksheet('全產品不良排名').getCell('C2').value,'其他不良');
-  assert.equal(qualityOutput.getWorksheet('不良歸屬明細').getCell('I2').value,'FAIL');
-  assert.equal(qualityOutput.getWorksheet('全產品不良項目占比').rowCount,2);
-  assert.equal(qualityOutput.getWorksheet('全產品不良項目占比').getCell('D2').value,1);assert.equal(qualityOutput.getWorksheet('計算明細').getCell('I1').value,'不良率');
+  assert.equal(qualityOutput.getWorksheet('全產品不良排名'),undefined);
+  assert.equal(qualityOutput.getWorksheet('產品製程總良率'),undefined);
+  assert.equal(qualityOutput.getWorksheet('不良歸屬明細'),undefined);
+  const defectAnalysis=qualityOutput.getWorksheet('不良分析');assert.equal(defectAnalysis.getCell('A4').value,'日期');assert.equal(defectAnalysis.getCell('E5').value,'其他不良');assert.equal(defectAnalysis.getCell('G5').value,1);assert.equal(defectAnalysis.getCell('I5').value,.5);assert.equal(defectAnalysis.getCell('I6').value,.5);
+  assert.equal(qualityOutput.getWorksheet('全產品不良項目占比'),undefined);assert.equal(qualityOutput.getWorksheet('未達標分析'),undefined);assert.equal(qualityOutput.getWorksheet('計算明細').getCell('I1').value,'不良率');
   await page.locator('#yieldFile').setInputFiles({name:'downloaded-master.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile(await qualityDownload.path())});
   await page.locator('#yieldCalculate').click();await page.locator('#yieldResult').waitFor({state:'visible'});
   const [reanalysis]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);
-  const reloaded=new ExcelJS.Workbook();await reloaded.xlsx.readFile(await reanalysis.path());assert.equal(reloaded.getWorksheet('全產品不良排名').getCell('C2').value,'其他不良');
+  const reloaded=new ExcelJS.Workbook();await reloaded.xlsx.readFile(await reanalysis.path());assert.equal(reloaded.getWorksheet('不良分析').getCell('E5').value,'其他不良');
   assert.equal(await page.locator('#thresholdDashboard').isVisible(),true);
-  assert.ok(qualityOutput.getWorksheet('未達標分析'));
   await page.locator('#qualityGlobalChart button').first().click();
   assert.match(await page.locator('#qualitySelection').innerText(),/其他不良/);
   assert.match(await page.locator('#qualityLinkedDetails').innerText(),/其他不良/);
@@ -120,7 +119,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   lowSheet.addRow(['DAF外觀','o','p','n','low-a',new Date('2026-10-05'),'op','偏移','FAIL','Goodix','Model']);lowSheet.addRow(['DAF外觀','o','p','n','low-b',new Date('2026-10-05'),'op',null,'GOOD','Goodix','Model']);
   await page.locator('#yieldFile').setInputFiles({name:'low.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await lowMaster.xlsx.writeBuffer())});await page.locator('#yieldCalculate').click();await page.locator('#thresholdDashboard').waitFor({state:'visible'});
   assert.match(await page.locator('#thresholdSummary').innerText(),/1 組/);await page.locator('#thresholdChart button').click();assert.equal(await page.locator('#thresholdStage').inputValue(),'前段');assert.match(await page.locator('#thresholdTable').innerText(),/偏移/);
-  const [lowDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);const lowOutput=new ExcelJS.Workbook();await lowOutput.xlsx.readFile(await lowDownload.path());assert.equal(lowOutput.getWorksheet('未達標分析').getCell('F2').value,.5);assert.equal(lowOutput.getWorksheet('未達標分析').getCell('O2').value,1);assert.equal(lowOutput.getWorksheet('未達標分析').getCell('P2').value,1);const composition=lowOutput.getWorksheet('全產品不良項目占比');assert.equal(composition.getCell('D2').value,1);assert.equal(composition.getCell('G2').value,.5);assert.equal(composition.getCell('H2').value,.5);assert.match(await page.locator('#defectCompositionTable').innerText(),/占製程投入數的不良比例/);
+  const [lowDownload]=await Promise.all([page.waitForEvent('download'),page.locator('#yieldDownload').click()]);const lowOutput=new ExcelJS.Workbook();await lowOutput.xlsx.readFile(await lowDownload.path());assert.equal(lowOutput.getWorksheet('未達標分析'),undefined);assert.equal(lowOutput.getWorksheet('全產品不良項目占比'),undefined);assert.equal(lowOutput.getWorksheet('不良分析').getCell('G5').value,1);assert.equal(lowOutput.getWorksheet('不良分析').getCell('I5').value,.5);assert.match(await page.locator('#defectCompositionTable').innerText(),/占製程投入數的不良比例/);
 
 
 

@@ -8,7 +8,7 @@ self.onmessage=async({data:file})=>{try{
  const {book,calculation,...stats}=buildYieldReport(merger,analysis.identities);applyProductStageAverage(analysis,calculation.stageChecks);
  self.postMessage({type:'progress',message:'正在分析不良歸屬、排名與總良率…'});
  appendQualitySheets(XLSX,book,analysis);
- const thresholds=buildThresholdAnalysis(merger,calculation,analysis.identities);appendThresholdSheet(XLSX,book,thresholds);
+ const thresholds=buildThresholdAnalysis(merger,calculation,analysis.identities);
  stats.filename=stats.filename.replace('.xlsx','_不良分析.xlsx');
  self.postMessage({type:'progress',message:'分析完成，正在產生 Excel 下載檔…'});
  const bytes=XLSX.write(book,{bookType:'xlsx',type:'array',compression:true});

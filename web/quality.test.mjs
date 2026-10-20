@@ -12,8 +12,8 @@ test('unique units and one primary process/defect reconcile every ranking to ove
  assert.ok(Math.abs(a.products.reduce((sum,p)=>sum+p.contribution,0)-a.badRate)<1e-12);
  assert.equal(a.defects.reduce((sum,d)=>sum+d.count,0),a.fail);
  assert.equal(a.processes.find(p=>p.process==='P1').total,4);assert.equal(a.processes.find(p=>p.process==='P1').fail,2);
- const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);assert.equal(book.Sheets['品質總覽'].F2.v,.6);assert.equal(book.Sheets['全產品不良排名'].F2.v,.4);
- const defectSheet=book.Sheets['不良分析'];assert.equal(defectSheet.A1.v,'IC');assert.equal(defectSheet.C2.v,'2026-10-05');assert.equal(defectSheet.E2.v,'破損,或一致性差');assert.equal(defectSheet.F2.v,2);assert.equal(defectSheet.G2.v,3);assert.match(defectSheet.H2.v,/a/);assert.equal(defectSheet.I1,undefined);
+ const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);assert.equal(book.Sheets['品質總覽'].F2.v,.6);assert.equal(book.Sheets['全產品不良排名'],undefined);
+ const defectSheet=book.Sheets['不良分析'];assert.equal(defectSheet.A1.v,'全產品總PPID');assert.equal(defectSheet.B1.v,a.total);assert.equal(defectSheet.H1.v,a.badRate);assert.equal(defectSheet.A4.v,'日期');assert.equal(defectSheet.A5.v,'2026-10-05');assert.equal(defectSheet.E5.v,'破損,或一致性差');assert.equal(defectSheet.F5.v,3);assert.equal(defectSheet.G5.v,2);assert.equal(defectSheet.H5.v,2/3);assert.equal(defectSheet.I5.v,.4);assert.equal(defectSheet.I7.v,a.badRate);assert.equal(defectSheet.I7.z,'0.00%');
  const loaded=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});assert.equal(loaded.Sheets['品質總覽'].B2.v,5);
 });
 test('product total yield averages populated date-stage yields while PPID metrics and daily calculations stay separate',()=>{
@@ -44,7 +44,7 @@ test('first FAIL overrides a GOOD defect and survives workbook download/reload',
  assert.equal(analyzeQuality(merger).attribution[0].defect,'second in input');
  const downloaded=XLSX.read(XLSX.write(merged.book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),again=new DetailMerger(XLSX);again.add(downloaded,'merged.xlsx');
  assert.equal(analyzeQuality(again).attribution[0].defect,'second in input');assert.equal(analyzeQuality(again).attribution[0].timestamp,later[5]);
- const report=XLSX.utils.book_new();appendQualitySheets(XLSX,report,analyzeQuality(again));assert.equal(report.Sheets['不良歸屬明細'].I2.v,'FAIL');
+ const report=XLSX.utils.book_new();appendQualitySheets(XLSX,report,analyzeQuality(again));assert.equal(report.Sheets['不良歸屬明細'],undefined);assert.equal(report.Sheets['不良分析'].E5.v,'second in input');
  downloaded.Sheets.Detail.H2.v='manually changed';const changed=new DetailMerger(XLSX);changed.add(downloaded,'edited.xlsx');assert.equal(analyzeQuality(changed).attribution[0].defect,'manually changed');
 });
 test('FAIL without defect text remains a bad PPID and is explicitly marked',()=>{
