@@ -44,10 +44,14 @@ function analyzeQuality(merger){
  const result={total:globalTotal,good:globalTotal-globalFail,fail:globalFail,badRate:globalTotal?globalFail/globalTotal:0,yield:globalTotal?(globalTotal-globalFail)/globalTotal:0,products:productRows,defects:ranking([...globalDefects.values()],globalTotal),processes:processRows(processes),productProcesses:processRows(productProcesses),attribution,dailyProcessTotals,identityConflicts};
  Object.defineProperty(result,'identities',{value:new Map([...units.values()].map(u=>[u.serial,products.get(u.product)]))});return result;
 }
+function applyProductStageAverage(analysis,stageChecks){
+ for(const product of analysis.products){const values=stageChecks.filter(check=>check.product===product.id&&Number.isFinite(check.yield)).map(check=>check.yield);product.stageAverageCount=values.length;product.yield=values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;}
+ return analysis;
+}
 function appendQualitySheets(XLSX,book,analysis){
  const append=(name,rows,percentColumns)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++)for(const c of percentColumns){const cell=sheet[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='0.00%';}sheet['!cols']=rows[0].map(()=>({wch:24}));XLSX.utils.book_append_sheet(book,sheet,name);};
- append('品質總覽',[['統計範圍','總片數','良品片數','不良片數','總良率','不良率'],['全部產品',analysis.total,analysis.good,analysis.fail,analysis.yield,analysis.badRate]], [4,5]);
- append('產品總良率',[['IC','機種','產品總片數','良品片數','不良片數','產品總良率','產品自身不良率','占全產品不良貢獻比例'],...analysis.products.map(p=>[p.ic,p.model,p.total,p.good,p.fail,p.yield,p.badRate,p.contribution])],[5,6,7]);
+ append('品質總覽',[['統計範圍','總片數','良品片數','不良片數','唯一PPID總良率','唯一PPID不良率'],['全部產品',analysis.total,analysis.good,analysis.fail,analysis.yield,analysis.badRate]], [4,5]);
+ append('產品總良率',[['IC','機種','產品PPID數','PPID良品數','PPID不良數','產品總良率（日期×階段算術平均）','PPID不良率（唯一PPID）','平均納入日期×階段數','占全產品不良貢獻比例'],...analysis.products.map(p=>[p.ic,p.model,p.total,p.good,p.fail,p.yield,p.badRate,p.stageAverageCount||0,p.contribution])],[5,6,8]);
  append('全產品不良排名',[['排名','歸屬製程','不良項目','不良片數','全產品總片數','占全產品不良比例'],...analysis.defects.map(d=>[d.rank,d.process,d.defect,d.count,d.total,d.rate])],[5]);
  append('各產品不良排名',[['IC','機種','排名','歸屬製程','不良項目','不良片數','產品總片數','占該產品不良比例','占全產品不良貢獻比例'],...analysis.products.flatMap(p=>p.defects.map(d=>[p.ic,p.model,d.rank,d.process,d.defect,d.count,d.total,d.rate,d.count/analysis.total]))],[7,8]);
  append('製程總良率',[['製程','經過製程總片數','良品片數','不良片數','總良率'],...analysis.processes.map(p=>[p.process,p.total,p.good,p.fail,p.yield])],[4]);
@@ -60,8 +64,8 @@ function appendQualitySheets(XLSX,book,analysis){
  const defectAnalysisSheet=XLSX.utils.aoa_to_sheet(defectAnalysis);defectAnalysisSheet['!cols']=[{wch:20},{wch:24},{wch:14},{wch:28},{wch:36},{wch:20},{wch:24},{wch:48}];XLSX.utils.book_append_sheet(book,defectAnalysisSheet,'不良分析');
  append('PPID對照衝突',[['PPID','過站紀錄數','觀察到的IC／機種對照'],...analysis.identityConflicts.map(c=>[c.serial,c.records,JSON.stringify(c.mappings)])],[]);
  append('統計說明',[
- ['項目','口徑'],['產品身份','以 PPID（小板序號）為唯一身份，跨產品對照、站點及日期只算一片；一致的非空 IC／機種沿用，有矛盾則列入對照衝突組。'],['不良片','狀態 FAIL 或 H 欄有不良項目均計為不良，包含 GOOD。每個 PPID 跨日期、跨製程只計一次；FAIL 未填項目時標示「未填不良項目」。'],['不良歸屬','一片只歸屬一次，每個 PPID 優先取輸入順序第一筆 FAIL，沒有 FAIL 才取第一筆有不良項目的 GOOD。多檔先依選取順序，再依原始列序；不按產出時間重選。合併 XLSX 保存第一次項目與各合併組的不良標記，Detail 的 FAIL 優先規則不變。'],['不良項目','H 欄完整內容視為一個項目，不拆分逗號、頓號等描述；其他紀錄依原合併規則保留於 Detail。'],['產品內加總','各項不良片數／該產品總片數，加總＝該產品自身不良率。'],['全產品加總','各產品不良片數／全產品總片數，加總＝整體不良率。'],['產品自身不良率','各產品使用不同分母，不能直接相加；改用全產品不良貢獻比例相加。'],['製程總良率','該製程良品的不重複片數／經過該製程總片數；同片於該製程曾不良即計為不良。'],['缺漏產品','明確標示待補，仍計入整體並保留明細。'],['每日前後段','每日製程良率＝良品片數／總片數，不良率＝不良片數／總片數；前後段仍採 AGGREGATE 製程良率平均。']
+ ['項目','口徑'],['產品身份','以 PPID（小板序號）為唯一身份，跨產品對照、站點及日期只算一片；一致的非空 IC／機種沿用，有矛盾則列入對照衝突組。'],['不良片','狀態 FAIL 或 H 欄有不良項目均計為不良，包含 GOOD。每個 PPID 跨日期、跨製程只計一次；FAIL 未填項目時標示「未填不良項目」。'],['不良歸屬','一片只歸屬一次，每個 PPID 優先取輸入順序第一筆 FAIL，沒有 FAIL 才取第一筆有不良項目的 GOOD。多檔先依選取順序，再依原始列序；不按產出時間重選。合併 XLSX 保存第一次項目與各合併組的不良標記，Detail 的 FAIL 優先規則不變。'],['不良項目','H 欄完整內容視為一個項目，不拆分逗號、頓號等描述；其他紀錄依原合併規則保留於 Detail。'],['產品內加總','各項不良片數／該產品總片數，加總＝該產品自身不良率。'],['全產品加總','各產品不良片數／全產品總片數，加總＝整體不良率。'],['產品自身不良率','各產品使用不同分母，不能直接相加；改用全產品不良貢獻比例相加。'],['製程總良率','該製程良品的不重複片數／經過該製程總片數；同片於該製程曾不良即計為不良。'],['缺漏產品','明確標示待補，仍計入整體並保留明細。'],['每日前後段','每日製程良率＝良品片數／總片數，不良率＝不良片數／總片數；前後段仍採 AGGREGATE 製程良率平均。'],['產品總良率','各機種所有有資料的日期×階段良率取算術平均；不改每日階段良率。PPID數量、不良率及不良貢獻仍按跨日期唯一PPID計算，故產品總良率與PPID不良率不互為補數。']
  ],[]);
 }
-root.analyzeQuality=analyzeQuality;root.appendQualitySheets=appendQualitySheets;
+root.analyzeQuality=analyzeQuality;root.applyProductStageAverage=applyProductStageAverage;root.appendQualitySheets=appendQualitySheets;
 })(typeof self!=='undefined'?self:globalThis);

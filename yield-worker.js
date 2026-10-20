@@ -5,7 +5,7 @@ self.onmessage=async({data:file})=>{try{
  const merger=new DetailMerger(XLSX);merger.add(DetailMerger.readBook(XLSX,await file.arrayBuffer()),file.name);
  self.postMessage({type:'progress',message:'正在計算每日製程良率、前段／後段與 SMT…'});
  const analysis=analyzeQuality(merger);
- const {book,calculation,...stats}=buildYieldReport(merger,analysis.identities);
+ const {book,calculation,...stats}=buildYieldReport(merger,analysis.identities);applyProductStageAverage(analysis,calculation.stageChecks);
  self.postMessage({type:'progress',message:'正在分析不良歸屬、排名與總良率…'});
  appendQualitySheets(XLSX,book,analysis);
  const thresholds=buildThresholdAnalysis(merger,calculation,analysis.identities);appendThresholdSheet(XLSX,book,thresholds);
