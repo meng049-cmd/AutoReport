@@ -1,6 +1,6 @@
 importScripts('browser-storage.js?v=2');
 let runtime;
-const get=async path=>{const r=await fetch(new URL(path,self.location.href));if(!r.ok)throw Error('無法載入瀏覽器資料庫工具。');return new Uint8Array(await r.arrayBuffer());};
+const get=async path=>{const url=new URL(path,self.location.href);if(path.startsWith('browser-python/'))url.search=self.location.search;const r=await fetch(url);if(!r.ok)throw Error('無法載入瀏覽器資料庫工具。');return new Uint8Array(await r.arrayBuffer());};
 async function initialize(){
  if(runtime)return runtime;
  importScripts('vendor/pyodide/pyodide.js');const py=await loadPyodide({indexURL:new URL('vendor/pyodide/',self.location.href).href});
@@ -24,7 +24,7 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
   py.FS.unlink(path);self.postMessage({id,result:{reference}});return;
  }
  if(type==='download'){const bytes=state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3');self.postMessage({id,result:bytes.buffer},[bytes.buffer]);return;}
- if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>20*1024*1024)throw Error('請選擇一份 20 MB 以內的 .xlsx 原始對照檔。');
+ if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>100*1024*1024)throw Error('請選擇一份 100 MB 以內的 .xlsx 原始對照檔。');
  self.postMessage({id,progress:'首次更新正在載入本地運算工具，請稍候…'});const py=await initialize();
  py.FS.writeFile('/app/data/active.sqlite3',state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3'));
  const filename=file.name.split(/[\\/]/).at(-1);py.FS.writeFile('/app/'+filename,new Uint8Array(await file.arrayBuffer()));

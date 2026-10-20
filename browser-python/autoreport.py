@@ -17,6 +17,7 @@ from zipfile import ZipFile
 
 from opencc import OpenCC
 from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet._reader import WorkSheetParser
 from openpyxl.utils.cell import column_index_from_string, range_boundaries
 
 ROOT = Path(__file__).resolve().parent
@@ -108,6 +109,10 @@ def role(header):
     return None
 
 
+def cell_at(row, column, default=''):
+    return row[column] if column < len(row) else default
+
+
 def excel_sheets(payload, sheet_names=None):
     """Preserve raw cells; expand merged identifiers in a separate working copy.
 
@@ -131,30 +136,48 @@ def excel_sheets(payload, sheet_names=None):
             book.close()
             raise ValueError('缺少指定來源分頁：' + '、'.join(missing) + '；未匯入任何資料。')
         selected = [names[norm(name)] for name in sheet_names]
-    with ZipFile(io.BytesIO(payload)) as archive:
-        for sheet in selected:
-            xml = ET.fromstring(archive.read(sheet._worksheet_path.lstrip('/')))
-            cells = [c for c in xml.findall('.//m:c', NS)
-                     if any(c.find('m:' + tag, NS) is not None for tag in ('v', 'is', 'f'))]
-            max_col = max((column_index_from_string(re.sub('[^A-Za-z]', '', c.attrib['r']))
-                           for c in cells), default=1)
-            max_row = max((int(re.sub('[^0-9]', '', c.attrib['r'])) for c in cells), default=1)
-            if max_col > 512 or max_row > 100000:
-                raise ValueError('資料超過支援範圍（每頁 512 欄、100000 列）。')
-            raw = [[text(v) for v in r] for r in sheet.iter_rows(
-                max_row=max_row, max_col=max_col, values_only=True)]
-            expanded = [r.copy() for r in raw]
-            for cell in xml.findall('.//m:mergeCell', NS):
-                c1, r1, c2, r2 = range_boundaries(cell.attrib['ref'])
-                if r1 > max_row or c1 > max_col:
-                    continue
-                value = raw[r1 - 1][c1 - 1]
-                for r in range(r1 - 1, min(r2, max_row)):
-                    for c in range(c1 - 1, min(c2, max_col)):
-                        if not expanded[r][c]:
-                            expanded[r][c] = value
-            output.append((sheet.title, raw, expanded))
-    book.close()
+    try:
+        with ZipFile(io.BytesIO(payload)) as archive:
+            for sheet in selected:
+                raw = []
+                with archive.open(sheet._worksheet_path.lstrip('/')) as stream:
+                    # Use openpyxl's cached-value decoder without iter_rows' rectangular padding.
+                    parser = WorkSheetParser(stream, sheet._shared_strings, data_only=True,
+                                             epoch=book.epoch, date_formats=book._date_formats,
+                                             timedelta_formats=book._timedelta_formats)
+                    for row_number, cells in parser.parse():
+                        values = {c['column']: text(c['value']) for c in cells if text(c['value'])}
+                        if not values:
+                            continue
+                        if row_number > 1048576 or max(values) > 16384:
+                            raise ValueError('資料超過 Excel 工作表上限（16384 欄、1048576 列），請拆分檔案。')
+                        if row_number > len(raw):
+                            raw.extend([] for _ in range(row_number - len(raw)))
+                        row = [''] * max(values)
+                        for column, value in values.items():
+                            row[column - 1] = value
+                        raw[row_number - 1] = row
+                expanded = [row.copy() for row in raw]
+                header = find_header(raw)
+                columns = {c for c, value in enumerate(header[3]) if value} if header else set()
+                for merged in parser.merged_cells.mergeCell if parser.merged_cells else []:
+                    c1, r1, c2, r2 = range_boundaries(merged.ref)
+                    if r1 > len(raw):
+                        continue
+                    value = cell_at(raw[r1 - 1], c1 - 1)
+                    if not value:
+                        continue
+                    needed = {c1 - 1} | {c for c in columns if c1 - 1 <= c < c2}
+                    for r in range(r1 - 1, min(r2, len(raw))):
+                        for c in needed:
+                            if len(expanded[r]) <= c:
+                                expanded[r].extend([''] * (c + 1 - len(expanded[r])))
+                            if not expanded[r][c]:
+                                expanded[r][c] = value
+                output.append((sheet.title, raw, expanded))
+    finally:
+        book.close()
+
     return output
 
 
@@ -245,13 +268,15 @@ def import_excel(db, payload, filename, sheet_names=REFERENCE_SHEETS):
                 families = [c for c, h in enumerate(headers) if norm(h) == 'model'] if platforms else []
                 for i in range(offset + 1, len(raw)):
                     row = expanded[i]
-                    values = {r: [first_text(row[c]) for c, rr in enumerate(roles) if rr == r and first_text(row[c])]
+                    if not any(row):
+                        continue
+                    values = {r: [first_text(cell_at(row, c)) for c, rr in enumerate(roles) if rr == r and first_text(cell_at(row, c))]
                               for r in ('model', 'ic', 'part', 'dpn', 'order')}
                     entries = []
                     for c, value in enumerate(row):
-                        numbers = order_numbers(value, labeled=roles[c] == 'order') if roles[c] in ('order', None) else []
+                        numbers = order_numbers(value, labeled=cell_at(roles, c, None) == 'order') if cell_at(roles, c, None) in ('order', None) else []
                         for number in numbers:
-                            label = headers[c]
+                            label = cell_at(headers, c)
                             if not label:
                                 label = f'未標示欄位 {c + 1}'
                             entries.append((number, c + 1, label))
@@ -269,7 +294,7 @@ def import_excel(db, payload, filename, sheet_names=REFERENCE_SHEETS):
                     # Unlabeled 91/92/93/95/98 part columns in rework rows are useful references.
                     for c, value in enumerate(row):
                         value = first_text(value)
-                        if roles[c] is None and PART_PATTERN.fullmatch(value) and value[:2] in {'91', '92', '93', '95', '98'}:
+                        if cell_at(roles, c, None) is None and PART_PATTERN.fullmatch(value) and value[:2] in {'91', '92', '93', '95', '98'}:
                             values['part'].append(value)
                     values['part'] = list(dict.fromkeys(values['part']))
                     # Footnotes such as NPI's warehouse instruction are raw data, not mappings.
@@ -280,22 +305,22 @@ def import_excel(db, payload, filename, sheet_names=REFERENCE_SHEETS):
                     if any(norm(v) in {'ttl', 'total', '合计', '总计', 'dailycapacity', 'wip天数'}
                            for v in values['model']):
                         continue
-                    if any(role(row[c]) == roles[c] for c in range(len(roles))
-                           if roles[c] and row[c]):
+                    if any(role(cell_at(row, c)) == cell_at(roles, c, None) for c in range(len(roles))
+                           if cell_at(roles, c, None) and cell_at(row, c)):
                         # Skip repeated header rows.
-                        if sum(role(row[c]) == roles[c] for c in range(len(roles))
-                               if roles[c] and row[c]) >= 2:
+                        if sum(role(cell_at(row, c)) == cell_at(roles, c, None) for c in range(len(roles))
+                               if cell_at(roles, c, None) and cell_at(row, c)) >= 2:
                             continue
-                    model_values = [first_text(row[c]) for c in platforms if first_text(row[c])] if platforms else values['model']
+                    model_values = [first_text(cell_at(row, c)) for c in platforms if first_text(cell_at(row, c))] if platforms else values['model']
                     model = model_values[0] if model_values else ''
-                    raw_ic = next((row[c] for c, rr in enumerate(roles) if rr == 'ic' and row[c]), '')
+                    raw_ic = next((cell_at(row, c) for c, rr in enumerate(roles) if rr == 'ic' and cell_at(row, c)), '')
                     ic, generation, notes = ic_details(raw_ic)
                     values['ic'] = [ic] if ic else []
-                    family = next((first_text(row[c]) for c in families if first_text(row[c])), '')
+                    family = next((first_text(cell_at(row, c)) for c in families if first_text(cell_at(row, c))), '')
                     family = family or generation
                     # Keep duplicate column names and physical column positions in provenance.
-                    original = [{'column': c + 1, 'header': h, 'value': raw[i][c]}
-                                for c, h in enumerate(headers) if h or raw[i][c]]
+                    original = [{'column': c + 1, 'header': h, 'value': cell_at(raw[i], c)}
+                                for c, h in enumerate(headers) if h or cell_at(raw[i], c)]
                     record_id = db.execute('INSERT INTO records(sheet_id,row_number,model,ic,family,'
                                            'parts_json,dpns_json,orders_json,raw_json,search_text,raw_ic,resolution_json) '
                                            'VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -485,9 +510,9 @@ def input_tables(payload, filename):
             raise ValueError('CSV 編碼無法辨識，請使用 UTF-8。')
         rows = list(csv.reader(io.StringIO(decoded)))
         width = max(map(len, rows), default=0)
-        if width > 512 or len(rows) > 100000:
-            raise ValueError('CSV 超過支援範圍。')
-        rows = [r + [''] * (width - len(r)) for r in rows]
+        if width > 16384 or len(rows) > 1048576:
+            raise ValueError('CSV 超過 Excel 工作表上限（16384 欄、1048576 列），請拆分檔案。')
+        rows = [[text(v) for v in row] for row in rows]
         return [(Path(filename).stem, rows, rows)]
     raise ValueError('請上傳 .xlsx 或 .csv 檔案。')
 
@@ -503,11 +528,11 @@ def match_upload(db, payload, filename):
         for i in range(offset + 1, len(raw)):
             if not any(raw[i]):
                 continue
-            criteria = [(r, expanded[i][c]) for c, r in enumerate(roles) if r and expanded[i][c]]
+            criteria = [(r, cell_at(expanded[i], c)) for c, r in enumerate(roles) if r and cell_at(expanded[i], c)]
             result = lookup(db, criteria)
             unique = result['候選'][0] if result['狀態'] == '唯一匹配' else {}
             results.append({'分頁': name, '列號': i + 1,
-                            '原始資料': [{'欄位': h, '值': raw[i][c]} for c, h in enumerate(headers)],
+                            '原始資料': [{'欄位': h, '值': cell_at(raw[i], c)} for c, h in enumerate(headers)],
                             '機種': unique.get('機種', ''), 'IC': unique.get('IC', ''), **result})
     return {'檔名': Path(filename).name, '筆數': len(results), '提示': notices, '結果': results}
 
