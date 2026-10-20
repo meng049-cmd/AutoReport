@@ -80,7 +80,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   assert.equal(yieldBook.getWorksheet('品質總覽').getCell('B2').value,1);
   assert.equal(await page.locator('#qualityDashboard').isVisible(),true);
   await page.locator('#qualityProduct').selectOption({label:'Goodix／Taroko 14'});
-  assert.match(await page.locator('#qualityProducts').innerText(),/100.00%/);
+  assert.match(await page.locator('#qualityProducts').innerText(),/產品總良率.*—/s);
   assert.match(await page.locator('#qualityProductDefects').innerText(),/加總 0 不良片/);
   const qualityFixture=new ExcelJS.Workbook();await qualityFixture.xlsx.load(await mergedMatchedBook.xlsx.writeBuffer());
   const qualityDetail=qualityFixture.getWorksheet('Detail');qualityDetail.getCell('H2').value='第一筆不良項目';qualityDetail.getCell('I2').value='GOOD';
@@ -98,6 +98,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   const qualityOutput=new ExcelJS.Workbook();await qualityOutput.xlsx.readFile(await qualityDownload.path());
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('B2').value,2);
   assert.equal(qualityOutput.getWorksheet('品質總覽').getCell('F2').value,.5);
+  assert.equal(qualityOutput.getWorksheet('產品總良率').getCell('F1').value,'產品總良率（日期×階段算術平均）');
   assert.equal(qualityOutput.getWorksheet('全產品不良排名').rowCount,2);
   assert.equal(qualityOutput.getWorksheet('全產品不良排名').getCell('C2').value,'其他不良');
   assert.equal(qualityOutput.getWorksheet('不良歸屬明細').getCell('I2').value,'FAIL');

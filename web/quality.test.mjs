@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
 const context=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),context);
-const {XLSX,DetailMerger,analyzeQuality,appendQualitySheets}=context;
+const {XLSX,DetailMerger,analyzeQuality,applyProductStageAverage,appendQualitySheets}=context;
 const header=['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'];
 const row=(serial,process,status,defect,day=5,ic='A')=>[process,'o','p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
 function analyze(rows){const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');const merger=new DetailMerger(XLSX);merger.add(book,'master.xlsx');return analyzeQuality(merger);}
@@ -15,6 +15,12 @@ test('unique units and one primary process/defect reconcile every ranking to ove
  const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);assert.equal(book.Sheets['品質總覽'].F2.v,.6);assert.equal(book.Sheets['全產品不良排名'].F2.v,.4);
  const defectSheet=book.Sheets['不良分析'];assert.equal(defectSheet.A1.v,'IC');assert.equal(defectSheet.C2.v,'2026-10-05');assert.equal(defectSheet.E2.v,'破損,或一致性差');assert.equal(defectSheet.F2.v,2);assert.equal(defectSheet.G2.v,3);assert.match(defectSheet.H2.v,/a/);assert.equal(defectSheet.I1,undefined);
  const loaded=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});assert.equal(loaded.Sheets['品質總覽'].B2.v,5);
+});
+test('product total yield averages populated date-stage yields while PPID metrics and daily calculations stay separate',()=>{
+ const a=analyze([row('a','P1','FAIL','bad'),row('b','P1','GOOD',null)]),id=a.products[0].id;
+ applyProductStageAverage(a,[{product:id,date:'2026-10-05',stage:'前段',yield:.8},{product:id,date:'2026-10-06',stage:'SMT',yield:1},{product:id,date:'2026-10-06',stage:'後段',yield:.7},{product:'other',date:'2026-10-05',stage:'SMT',yield:0}]);
+ assert.equal(a.products[0].yield,(.8+1+.7)/3);assert.equal(a.products[0].stageAverageCount,3);assert.equal(a.products[0].badRate,.5);assert.equal(a.products[0].fail,1);
+ const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);const sheet=book.Sheets['產品總良率'];assert.equal(sheet.F2.v,(.8+1+.7)/3);assert.equal(sheet.G2.v,.5);assert.equal(sheet.H2.v,3);assert.match(book.Sheets['統計說明'].B12.v,/日期×階段良率取算術平均/);
 });
 test('one PPID with contradictory products is counted once and explicitly pending',()=>{
  const a=analyze([row('same','P1','FAIL','對照測試'),row('same','P1','GOOD',null,6,'B')]);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.identityConflicts.length,1);assert.equal(a.products[0].pending,true);assert.equal(a.defects[0].defect,'對照測試');
