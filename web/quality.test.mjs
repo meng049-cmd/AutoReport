@@ -20,7 +20,7 @@ test('product total yield averages populated date-stage yields while PPID metric
  const a=analyze([row('a','P1','FAIL','bad'),row('b','P1','GOOD',null)]),id=a.products[0].id;
  applyProductStageAverage(a,[{product:id,date:'2026-10-05',stage:'前段',yield:.8},{product:id,date:'2026-10-06',stage:'SMT',yield:1},{product:id,date:'2026-10-06',stage:'後段',yield:.7},{product:'other',date:'2026-10-05',stage:'SMT',yield:0}]);
  assert.equal(a.products[0].yield,(.8+1+.7)/3);assert.equal(a.products[0].stageAverageCount,3);assert.equal(a.products[0].badRate,.5);assert.equal(a.products[0].fail,1);
- const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);const sheet=book.Sheets['產品總良率'];assert.equal(sheet.F2.v,(.8+1+.7)/3);assert.equal(sheet.G2.v,.5);assert.equal(sheet.H2.v,3);assert.match(book.Sheets['統計說明'].B12.v,/日期×階段良率取算術平均/);
+ const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);const sheet=book.Sheets['產品總良率'];assert.equal(sheet.F2.v,(.8+1+.7)/3);assert.equal(sheet.G2.v,.5);assert.equal(sheet.H2.v,3);assert.match(XLSX.utils.sheet_to_json(book.Sheets['統計說明'],{header:1}).find(r=>r[0]==='產品總良率')[1],/日期×階段良率取算術平均/);
 });
 test('one PPID with contradictory products is counted once and explicitly pending',()=>{
  const a=analyze([row('same','P1','FAIL','對照測試'),row('same','P1','GOOD',null,6,'B')]);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.identityConflicts.length,1);assert.equal(a.products[0].pending,true);assert.equal(a.defects[0].defect,'對照測試');
@@ -79,4 +79,16 @@ test('GOOD-only defect evidence survives compact metadata when the visible merge
  const b=XLSX.utils.book_new();XLSX.utils.book_append_sheet(b,XLSX.utils.aoa_to_sheet([header,row('a','P1','GOOD',null),row('a','P1','GOOD','GOOD-only evidence')]),'Detail');
  const m=new DetailMerger(XLSX);m.add(b,'raw.xlsx');const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(m.finish().book,{type:'array',bookType:'xlsx'})),'merged.xlsx');
  assert.equal(analyzeQuality(again).fail,1);assert.equal(analyzeQuality(again).attribution[0].defect,'GOOD-only evidence');assert.equal(analyzeQuality(again).attribution[0].status,'GOOD');
+});
+
+test('AOI is excluded from quality units, failures, mappings and denominators; Detail keeps all rows',()=>{
+ const rows=[row('only-aoi','正面AOI','FAIL','excluded'),row('good','背面 AOI','FAIL','excluded',5,'conflicting IC'),row('good','DAF外觀','GOOD',null),row('bad','正面ＡＯＩ','FAIL','excluded'),row('bad','功能一測試','GOOD','included GOOD defect',6)];
+ const a=analyze(rows);assert.equal(a.total,2);assert.equal(a.fail,1);assert.equal(a.badRate,.5);assert.equal(a.identityConflicts.length,0);assert.equal(a.attribution[0].serial,'bad');assert.equal(a.attribution[0].status,'GOOD');assert.equal(a.attribution[0].defect,'included GOOD defect');assert.ok(a.observations.every(r=>!r.process.includes('AOI')));assert.ok(a.processes.every(r=>!r.process.includes('AOI')));
+ const empty=analyze([row('a','背面AOI','FAIL','excluded')]);assert.equal(empty.total,0);assert.equal(empty.yield,null);assert.equal(empty.badRate,null);const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,empty);assert.equal(book.Sheets['不良分析'].H2,undefined);
+});
+
+test('first non-AOI FAIL and its work order survive chronological XLSX sorting independently of AOI first NG',()=>{
+ const book=XLSX.utils.book_new(),first=row('a','功能二測試','FAIL','輸入首筆有效FAIL',7),earlier=row('a','DAF外觀','FAIL','時間更早',3);first[1]='首次工單';earlier[1]='後來工單';XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,row('a','正面AOI','FAIL','AOI first',1),first,earlier]),'Detail');
+ const m=new DetailMerger(XLSX);m.add(book,'原始.xlsx');const merged=m.finish();assert.equal(merged.output_rows,3);assert.equal(m.firstNG.get('a').defect,'AOI first');
+ const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'下載.xlsx');const a=analyzeQuality(again);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.attribution[0].defect,'輸入首筆有效FAIL');assert.equal(a.attribution[0].order,'首次工單');
 });

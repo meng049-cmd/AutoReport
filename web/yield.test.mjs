@@ -7,7 +7,7 @@ function report(rows){const book=XLSX.utils.book_new();XLSX.utils.book_append_sh
 test('per-product daily yields and arithmetic stage averages, including FAIL-first deduplication',()=>{
  const r=report([row('DAF外觀檢查','GOOD','a'),row('DAF外觀檢查','FAIL','a'),row('DAF外觀檢查','GOOD','b'),row('DAF熱壓投入','GOOD','c'),row('DAF熱壓投入','GOOD','d'),row('DAF熱壓投入','GOOD','e'),row('功能一測試','FAIL','f'),row('正面AOI','GOOD','s'),row('DAF外觀檢查','GOOD','x',7),row('DAF外觀檢查','FAIL','z',5,'Synaptics','CY26-16')]);
  assert.equal(r.removed_rows,1);assert.equal(r.product_count,2);assert.equal(r.date_count,3);
- const stages=r.book.Sheets['每日階段良率'];assert.equal(stages.B3.v,1);assert.equal(stages.B4.v,.5);assert.equal(stages.C4.v,'');assert.equal(stages.D4.v,1);assert.match(stages.B4.f,/AGGREGATE\(1,6/);
+ const stages=r.book.Sheets['每日階段良率'];assert.equal(stages.B3.v,'');assert.equal(stages.B4.v,.5);assert.equal(stages.C4.v,'');assert.equal(stages.D4.v,1);assert.match(stages.B4.f,/AGGREGATE\(1,6/);
  assert.equal(stages.B10.v,0,'all FAIL produces zero, not blank');
  const processes=r.book.Sheets['每日製程良率'];assert.equal(processes.B3.v,.5);assert.equal(processes.B4.v,1);assert.equal(processes.B5.v,0);
  assert.equal(r.book.Sheets['計算明細'].H2.f,'E2/(E2+F2)');
@@ -15,11 +15,16 @@ test('per-product daily yields and arithmetic stage averages, including FAIL-fir
  assert.equal(loaded.Sheets['每日階段良率'].B4.v,.5);assert.match(loaded.Sheets['每日階段良率'].B4.f,/AGGREGATE/);assert.equal(loaded.Sheets['每日階段良率'].C4.v,'');
  assert.equal(loaded.SheetNames.join(','),'每日製程良率,每日階段良率,計算明細,Detail');
 });
-test('missing product remains explicitly pending, with original rows preserved',()=>{const r=row('正面AOI','GOOD','a');r[9]='';const result=report([r]);assert.equal(result.missing_product_rows,1);assert.equal(result.product_count,0);assert.equal(result.pending_product_count,1);assert.equal(result.book.Sheets['每日製程良率'].A2.v,'【待補 IC】');assert.ok(result.book.Sheets['待補產品資料']);});
+test('missing product remains explicitly pending, with original rows preserved',()=>{const r=row('DAF外觀','GOOD','a');r[9]='';const result=report([r]);assert.equal(result.missing_product_rows,1);assert.equal(result.product_count,0);assert.equal(result.pending_product_count,1);assert.equal(result.book.Sheets['每日製程良率'].A2.v,'【待補 IC】');assert.ok(result.book.Sheets['待補產品資料']);});
 
 test('daily yield counts both FAIL and GOOD defect records, without duplicating same-day PPIDs',()=>{
- const a=row('正面AOI','GOOD','a');a[7]='CG內異物';const b=row('正面AOI','FAIL','b');b[7]=null;
- const replacement=row('正面AOI','FAIL','a');replacement[7]=null;
+ const a=row('DAF外觀','GOOD','a');a[7]='CG內異物';const b=row('DAF外觀','FAIL','b');b[7]=null;
+ const replacement=row('DAF外觀','FAIL','a');replacement[7]=null;
  const r=report([a,replacement,b]);assert.equal(r.output_rows,2);assert.equal(r.calculation.dailyCounts[0].fail,2);assert.equal(r.calculation.dailyCounts[0].good,0);assert.equal(r.book.Sheets['計算明細'].H2.v,0);assert.equal(r.book.Sheets['計算明細'].I2.v,1);assert.equal(r.book.Sheets['計算明細'].I2.f,'F2/(E2+F2)');
  const again=XLSX.read(XLSX.write(r.book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),m=new DetailMerger(XLSX);m.add(again,'report.xlsx');assert.equal(buildYieldReport(m).book.Sheets['計算明細'].H2.v,0);
+});
+
+test('AOI rows remain in Detail but never enter daily calculations, including an AOI-only workbook',()=>{
+ const r=report([row('正面AOI','FAIL','only'),row('背面AOI','FAIL','same'),row('DAF外觀','GOOD','same',7)]);assert.equal(r.output_rows,3);assert.equal(r.date_count,3);assert.equal(r.calculation.dailyCounts.length,1);assert.equal(r.calculation.dailyCounts[0].good,1);assert.equal(r.calculation.stageChecks.length,1);assert.equal(r.calculation.stageChecks[0].stage,'前段');assert.equal(r.book.Sheets['每日階段良率'].B3.v,'');assert.equal(r.book.Sheets['每日階段良率'].B4.v,'');assert.equal(r.book.Sheets['每日階段良率'].D4.v,1);
+ const only=report([row('正面AOI','FAIL','only')]);assert.equal(only.calculation.dailyCounts.length,0);assert.equal(only.product_count,0);assert.equal(XLSX.utils.sheet_to_json(only.book.Sheets.Detail,{header:1})[1][0],'正面AOI');assert.ok(only.book.Sheets['每日階段良率']['!ref']);
 });

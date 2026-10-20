@@ -6,11 +6,11 @@ const row=(serial,process,status,defect,day=5,ic='Goodix')=>[process,'o','p','n'
 function run(rows){const input=XLSX.utils.book_new();XLSX.utils.book_append_sheet(input,XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');const merger=new DetailMerger(XLSX);merger.add(input,'master.xlsx');const quality=analyzeQuality(merger),report=buildYieldReport(merger,quality.identities);return {merger,quality,report,result:buildThresholdAnalysis(merger,report.calculation,quality.identities)};}
 test('below-target date/stage diagnosis uses unique daily product/global PPID denominators and actual station counts',()=>{
  const rows=[];for(const process of ['DAF外觀','功能一測試'])for(const serial of ['a','b','c'])rows.push(row(serial,process,serial==='a'?'FAIL':'GOOD',serial==='a'?'bad':null));rows.push(row('d','正面AOI','GOOD',null,5,'Elan'));
- const {quality,report,result}=run(rows);assert.equal(result.below.length,1);assert.equal(result.below[0].stage,'前段');assert.equal(result.rows.length,1);const r=result.rows[0];assert.equal(r.count,1);assert.equal(r.productTotal,3);assert.equal(r.globalTotal,4);assert.equal(r.productRate,1/3);assert.equal(r.globalRate,1/4);assert.equal(r.processGood,2);assert.equal(r.processFail,1);assert.equal(r.process,'DAF外觀');assert.equal(r.yield,2/3);
+ const {quality,report,result}=run(rows);assert.equal(result.below.length,1);assert.equal(result.below[0].stage,'前段');assert.equal(result.rows.length,1);const r=result.rows[0];assert.equal(r.count,1);assert.equal(r.productTotal,3);assert.equal(r.globalTotal,3);assert.equal(r.productRate,1/3);assert.equal(r.globalRate,1/3);assert.equal(r.processGood,2);assert.equal(r.processFail,1);assert.equal(r.process,'DAF外觀');assert.equal(r.yield,2/3);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);const sheet=report.book.Sheets['未達標分析'];assert.equal(sheet.O2.v,2);assert.equal(sheet.P2.v,1);assert.equal(sheet.M2.v,1/3);
 });
 test('threshold equality passes and absent stages are never flagged',()=>{
- const {merger,quality,report}=run([row('a','正面AOI','GOOD',null)]);
+ const {merger,quality,report}=run([row('a','DAF外觀','GOOD',null)]);
  const checks=[{product:quality.products[0].id,ic:'Goodix',model:'Model',date:'2026-10-05',stage:'SMT',yield:.995,processes:['正面AOI']},{product:quality.products[0].id,stage:'前段',yield:.98,processes:[]},{product:quality.products[0].id,stage:'後段',yield:.99,processes:[]}];
  assert.equal(buildThresholdAnalysis(merger,{...report.calculation,stageChecks:checks},quality.identities).below.length,0);assert.equal(report.calculation.stageChecks.length,1);
 });
@@ -25,14 +25,14 @@ test('all-product composition assigns only the first defect per PPID and preserv
  assert.equal(offset.count,2);assert.equal(offset.processTotal,5);assert.equal(offset.stageTotal,7);assert.equal(offset.processGood,1);assert.equal(offset.processFail,4);assert.equal(offset.stageGood,2);assert.equal(offset.stageFail,5);assert.equal(offset.processShare,2/5);assert.equal(offset.stageShare,2/7);assert.equal(functional,undefined);
  assert.ok(Math.abs(result.composition.filter(r=>r.stage==='前段').reduce((n,r)=>n+r.stageShare,0)-3/7)<1e-12);
  assert.ok(Math.abs(result.composition.filter(r=>r.process==='DAF外觀').reduce((n,r)=>n+r.processShare,0)-3/5)<1e-12);
- assert.equal(result.composition.reduce((n,r)=>n+r.count,0),5);
- const unknown=result.composition.find(r=>r.process==='背面AOI');assert.equal(unknown.stageShare,null);assert.equal(unknown.processShare,1);
+ assert.equal(result.composition.reduce((n,r)=>n+r.count,0),3);
+ const unknown=result.composition.find(r=>r.process==='背面AOI');assert.equal(unknown,undefined);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);
  const sheet=report.book.Sheets['全產品不良項目占比'],index=result.composition.indexOf(offset)+2;
  assert.equal(sheet['D'+index].v,2);assert.equal(sheet['G'+index].v,2/5);assert.equal(sheet['H'+index].v,2/7);assert.equal(sheet['H'+index].z,'0.0000%');
 });
 test('empty FAIL composition exports headers without dividing by zero',()=>{
- const {quality,report,result}=run([row('a','正面AOI','GOOD',null)]);assert.equal(result.composition.length,0);
+ const {quality,report,result}=run([row('a','DAF外觀','GOOD',null)]);assert.equal(result.composition.length,0);
  appendQualitySheets(XLSX,report.book,quality);appendThresholdSheet(XLSX,report.book,result);assert.equal(report.book.Sheets['全產品不良項目占比']['!ref'],'A1:L1');
 });
 
