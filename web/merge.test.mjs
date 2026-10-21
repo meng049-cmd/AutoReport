@@ -52,3 +52,20 @@ test('original Chinese source filenames survive merge download and report reload
  const output=merger.finish().book,again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(output,{type:'array',bookType:'xlsx'})),'合併主檔.xlsx');
  assert.deepEqual([...again.sources],['W39工單明細.xlsx','W40工單明細.xlsx']);
 });
+
+test('Scrap is FAIL priority while raw cells and first FAIL/Scrap input order stay intact',()=>{
+ for(const [first,second,winner] of [['GOOD','Scrap','Scrap'],[' scrap ','FAIL',' scrap '],['FAIL','SCRAP','FAIL'],['sCrAp','GOOD','sCrAp']]){
+  const m=new DetailMerger(XLSX);m.add(book([row('P',5,first)]),'first.xlsx');m.add(book([row('P',5,second)]),'second.xlsx');
+  assert.equal(m.finish().book.Sheets.Detail.I2.v,winner);assert.equal(m.firstNG.get('serial').status,'FAIL');assert.equal(m.analysisFirstNG.get('serial').defect,'【未填不良項目】');
+ }
+ const m=new DetailMerger(XLSX);m.add(book([row('P',5,'Scrap').slice(0,7).concat('Scrap')],header.slice(0,7).concat('狀態')),'H-status.xlsx');assert.equal(m.hasDefect([...m.rows.values()][0]),true);
+});
+
+test('strict errors remain default; test mode skips only bad rows and preserves physical Excel row numbers across downloads',()=>{
+ const invalid=row('P',5,'UNKNOWN'),badDate=row('P',5,'GOOD');badDate[5]='not a date';const input=book([row('P',5,'Scrap'),[],invalid,badDate]);
+ assert.throws(()=>new DetailMerger(XLSX).add(input,'errors.xlsx'),/第 4 列.*GOOD／FAIL／Scrap/);
+ const m=new DetailMerger(XLSX,{skipInvalidRows:true});m.add(input,'errors.xlsx');assert.equal(m.total,1);assert.equal(m.rows.size,1);assert.equal(m.skippedRows.length,2);assert.equal(m.skippedRows[0].row,4);assert.equal(m.skippedRows[1].row,5);assert.equal(m.skippedRows[0].values[8],'UNKNOWN');assert.match(m.skippedRows[1].reason,/產出時間/);
+ const merged=m.finish();assert.equal(merged.skipped_rows,2);assert.equal(merged.removed_rows,0);const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'saved.xlsx');assert.equal(again.skippedRows.length,2);assert.equal(again.skippedRows[0].filename,'errors.xlsx');assert.equal(again.finish().skipped_rows,2);
+ assert.throws(()=>new DetailMerger(XLSX,{skipInvalidRows:true}).add({SheetNames:[]},'bad.xlsx'),/Detail/);
+ const empty=new DetailMerger(XLSX,{skipInvalidRows:true});empty.add(book([invalid]),'invalid.xlsx');assert.throws(()=>empty.finish(),/已略過 1 列.*沒有可分析/);empty.add(book([row('P',6,'GOOD')]),'valid.xlsx');assert.equal(empty.finish().output_rows,1);
+});

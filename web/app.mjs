@@ -4,7 +4,7 @@ import {addLibraryFile,clearFileLibrary,beginFileOperation,endFileOperation,libr
 import {MAX_BYTES} from './limits.mjs';
 import JSZip from 'jszip';
 import {mergeFiles,mergeFilesToBytes,clearMergedDownload} from './merge-ui.mjs';
-import {calculateYieldFile} from './yield-ui.mjs';
+import {calculateYieldFile,getYieldOptions} from './yield-ui.mjs';
 import {renderQuality} from './quality-ui.mjs';
 import {setReferenceSources} from './report-context.mjs';
 const $=id=>document.getElementById(id);
@@ -77,16 +77,16 @@ $('autoAnalyze').onclick=async()=>{
    const output=await call('export'),file=new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx'));matched.push(file);await addLibraryFile(file,{kind:'matched',sources:[{name:files[i].name,size:files[i].size,kind:'Detail'}],rows:result['筆數']});
   }
   $('message').textContent='一鍵處理：合併並依網站規則去重…';
-  const merged=await mergeFilesToBytes(matched,msg=>{$('message').textContent='一鍵處理：'+msg;});
+  const options=getYieldOptions();const merged=await mergeFilesToBytes(matched,msg=>{$('message').textContent='一鍵處理：'+msg;},options);
   const mergedFile=new File([merged.bytes],merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   await addLibraryFile(mergedFile,{kind:'merged',sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'})),rows:merged.output_rows});
   $('message').textContent='一鍵處理：計算每日階段良率與不良分析…';
-  const report=await calculateYieldFile(mergedFile,msg=>{$('message').textContent='一鍵處理：'+msg;},{sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
+  const report=await calculateYieldFile(mergedFile,msg=>{$('message').textContent='一鍵處理：'+msg;},{...options,sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
   await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});
   if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;
   renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks,{url:downloadUrl,filename:report.filename});
-  $('message').textContent='一鍵流程完成。所有產出檔案已加入清單；完整報表可點擊下載。';$('message').className='ok';
+  $('message').textContent='一鍵流程完成。所有產出檔案已加入清單；完整報表可點擊下載。'+(report.skipped_rows?' 已略過 '+report.skipped_rows+' 列錯誤資料，詳見報表。':'');$('message').className='ok';
  }catch(e){$('message').textContent=e.message;$('message').className='warn';}
  finally{button.disabled=false;$('match').disabled=false;$('file').disabled=false;$('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;endFileOperation();}
 };

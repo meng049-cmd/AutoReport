@@ -28,3 +28,8 @@ test('AOI rows remain in Detail but never enter daily calculations, including an
  const r=report([row('正面AOI','FAIL','only'),row('背面AOI','FAIL','same'),row('DAF外觀','GOOD','same',7)]);assert.equal(r.output_rows,3);assert.equal(r.date_count,3);assert.equal(r.calculation.dailyCounts.length,1);assert.equal(r.calculation.dailyCounts[0].good,1);assert.equal(r.calculation.stageChecks.length,1);assert.equal(r.calculation.stageChecks[0].stage,'前段');assert.equal(r.book.Sheets['每日階段良率'].B3.v,'');assert.equal(r.book.Sheets['每日階段良率'].B4.v,'');assert.equal(r.book.Sheets['每日階段良率'].D4.v,1);
  const only=report([row('正面AOI','FAIL','only')]);assert.equal(only.calculation.dailyCounts.length,0);assert.equal(only.product_count,0);assert.equal(XLSX.utils.sheet_to_json(only.book.Sheets.Detail,{header:1})[1][0],'正面AOI');assert.ok(only.book.Sheets['每日階段良率']['!ref']);
 });
+
+test('Scrap contributes to daily FAIL and arithmetic stage yields, even without defect text',()=>{
+ const r=report([row('DAF外觀','GOOD','a'),row('DAF外觀','Scrap','a'),row('DAF外觀',' scrap ','b'),row('DAF外觀','GOOD','c'),row('DAF熱壓投入','GOOD','d'),row('正面AOI','Scrap','aoi')]);
+ const daily=r.calculation.dailyCounts.find(r=>r.process==='DAF外觀');assert.equal(daily.good,1);assert.equal(daily.fail,2);assert.equal(r.book.Sheets['每日製程良率'].B3.v,1/3);assert.equal(r.book.Sheets['每日階段良率'].B4.v,(1/3+1)/2);assert.equal(XLSX.utils.sheet_to_json(r.book.Sheets.Detail,{header:1})[1][8],'Scrap');
+});

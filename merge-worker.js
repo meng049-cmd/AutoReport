@@ -1,8 +1,8 @@
 const version=new URL(self.location.href).search;
 importScripts('vendor/xlsx.full.min.js'+version, 'merge-core.js'+version);
-self.onmessage = async ({data: files}) => {
+self.onmessage = async ({data}) => {
   try {
-    const merger = new DetailMerger(XLSX);
+    const files=Array.isArray(data)?data:data.files,merger = new DetailMerger(XLSX,{skipInvalidRows:!Array.isArray(data)&&data.skipInvalidRows===true});
     for (let i = 0; i < files.length; i++) {
       self.postMessage({type: 'progress', message: `正在讀取 ${i + 1}/${files.length}：${files[i].name}`});
       const bytes = await files[i].arrayBuffer();

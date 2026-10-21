@@ -1,16 +1,18 @@
 (function (root) {
   'use strict';
+  // Preserve the original Detail cell; normalize only for validation and calculation.
+  function normalizeDetailStatus(value) {const status=String(value??'').trim().toUpperCase();return status==='SCRAP'?'FAIL':status;}
   // A checksum prevents stale first-NG metadata from surviving manual Detail edits.
   function ngChecksum(rows) {let hash=2166136261;for(const row of rows)for(const ch of JSON.stringify(row.slice(0,11))){hash=Math.imul(hash^ch.charCodeAt(0),16777619);}return (hash>>>0).toString(16);}
   function ngRecord(row,value,statusColumn) {
-    const status=String(row[statusColumn]??'').trim().toUpperCase(),defect=statusColumn===7?'':String(row[7]??'').trim();
+    const status=normalizeDetailStatus(row[statusColumn]),defect=statusColumn===7?'':String(row[7]??'').trim();
     if(status!=='FAIL'&&!defect)return null;
     return {order:String(row[1]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
   const isAnalysisProcess=value=>!['正面AOI','背面AOI'].includes(String(value??'').normalize('NFKC').replace(/\s+/g,'').toUpperCase());
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
   class DetailMerger {
-    constructor(XLSX) { this.XLSX = XLSX; this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.analysisFirstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
+    constructor(XLSX,{skipInvalidRows=false}={}) { this.XLSX = XLSX; this.skipInvalidRows=skipInvalidRows;this.skippedRows=[];this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.analysisFirstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
     static readBook(XLSX,bytes) {
       const names=XLSX.read(bytes,{type:'array',bookSheets:true}).SheetNames.filter(name=>name.trim().toLowerCase()==='detail');
       if(names.length!==1)throw Error('找不到唯一的 Detail 分頁。');
@@ -22,7 +24,7 @@
       const XLSX = this.XLSX;
       const names = book.SheetNames.filter(name => name.trim().toLowerCase() === 'detail');
       if (names.length !== 1) throw new Error(`${filename}：找不到唯一的 Detail 分頁。`);
-      const data = XLSX.utils.sheet_to_json(book.Sheets[names[0]], {header: 1, defval: null, blankrows: false, raw: true});
+      const data = XLSX.utils.sheet_to_json(book.Sheets[names[0]], {header: 1, defval: null, blankrows: true, raw: true});
       const header = data.shift();
       if (!header || header[0] !== '製程' || header[4] !== '小板序號') throw new Error(`${filename}：A 欄須為製程，E 欄須為小板序號。`);
       if (!this.header) {
@@ -30,14 +32,18 @@
         for (const title of ['產出時間', '狀態']) if (header.filter(value => value === title).length !== 1) throw new Error(`須包含唯一的「${title}」欄位。`);
         this.time = header.indexOf('產出時間'); this.status = header.indexOf('狀態');
       } else if (JSON.stringify(header) !== JSON.stringify(this.header)) throw new Error(`${filename}：Detail 欄位標題與順序不一致。`);
+      const rowOffset=this.XLSX.utils.decode_range(book.Sheets[names[0]]['!ref']).s.r+2;
       const localNG=new Map(),localAnalysisNG=new Map(),localDefectKeys=new Set(),fileValues=[];
+      try{const saved=JSON.parse(book.Custprops?.AutoReportSkippedRows||'null');if(Array.isArray(saved)&&saved.every(r=>r&&typeof r.filename==='string'&&Number.isInteger(r.row)&&typeof r.reason==='string'&&Array.isArray(r.values)))this.skippedRows.push(...saved);}catch{}
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
+        if(row.every(value=>value==null||value===''))continue;
         const process = String(row[0] ?? '').trim(), serial = String(row[4] ?? '').trim();
-        const status = String(row[this.status] ?? '').trim().toUpperCase();
+        const status = normalizeDetailStatus(row[this.status]);
         const timestamp = row[this.time];
         const date = typeof timestamp === 'number' && Number.isFinite(timestamp) ? XLSX.SSF.parse_date_code(timestamp, {date1904: Boolean(book.Workbook?.WBProps?.date1904)}) : null;
-        if (!date || date.y < 1900 || !process || !serial || !['GOOD','FAIL'].includes(status)) throw new Error(`${filename} 第 ${i + 2} 列：日期、製程、小板序號或 GOOD／FAIL 狀態無效。`);
+        const invalid=[];if(!date||date.y<1900)invalid.push('產出時間無效');if(!process)invalid.push('製程空白');if(!serial)invalid.push('小板序號空白');if(!['GOOD','FAIL'].includes(status))invalid.push('狀態無效（須為 GOOD／FAIL／Scrap）');
+        if(invalid.length){const reason=invalid.join('、');if(!this.skipInvalidRows)throw new Error(`${filename} 第 ${i + rowOffset} 列：${reason}。`);this.skippedRows.push({filename,row:i+rowOffset,reason,values:row.slice(0,11)});continue;}
         const day = `${date.y}-${String(date.m).padStart(2,'0')}-${String(date.d).padStart(2,'0')}`;
         // Normalize Excel's optional 1904 date system into the default 1900 system.
         const normalized = timestamp + (book.Workbook?.WBProps?.date1904 ? 1462 : 0);
@@ -47,7 +53,7 @@
         const ng=ngRecord(row,value,this.status),first=localNG.get(serial);
         if(ng){localDefectKeys.add(key);if(preferNG(ng,first))localNG.set(serial,ng);if(isAnalysisProcess(process)&&preferNG(ng,localAnalysisNG.get(serial)))localAnalysisNG.set(serial,ng);}
         const old = this.rows.get(key);
-        if (!old || (status === 'FAIL' && String(old.row[this.status]).trim().toUpperCase() !== 'FAIL')) this.rows.set(key,value);
+        if (!old || (status === 'FAIL' && normalizeDetailStatus(old.row[this.status]) !== 'FAIL')) this.rows.set(key,value);
         this.total++;
       }
       // Analysis prefers the first FAIL; only PPIDs without FAIL use their first GOOD defect.
@@ -78,7 +84,7 @@
     }
     hasDefect(value) {return this.defectKeys.has(value.key||JSON.stringify([value.day,String(value.row[0]).trim(),String(value.row[4]).trim()]));}
     finish({dense=false}={}) {
-      if (!this.rows.size) throw new Error('Detail 沒有可合併的資料。');
+      if (!this.rows.size) throw new Error(this.skippedRows.length?`已略過 ${this.skippedRows.length} 列錯誤資料，Detail 沒有可分析的有效資料。`:'Detail 沒有可合併的資料。');
       if (this.rows.size > 1048575) throw new Error('合併結果超過 Excel 單一分頁的列數上限，請減少上傳檔案。');
       const XLSX = this.XLSX, rows = [...this.rows.values()].sort((a,b) => a.timestamp - b.timestamp);
       const first = rows[0].day, last = rows.at(-1).day;
@@ -96,9 +102,10 @@
       book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
       book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.analysisFirstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
-      return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, start_date: first, end_date: last};
+      if(this.skippedRows.length)book.Custprops.AutoReportSkippedRows=JSON.stringify(this.skippedRows).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
+      return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, skipped_rows:this.skippedRows.length, start_date: first, end_date: last};
     }
   }
-  root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;
+  root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
   if (typeof module !== 'undefined') module.exports = DetailMerger;
 })(typeof self !== 'undefined' ? self : globalThis);

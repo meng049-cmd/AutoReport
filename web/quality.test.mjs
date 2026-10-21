@@ -92,3 +92,10 @@ test('first non-AOI FAIL and its work order survive chronological XLSX sorting i
  const m=new DetailMerger(XLSX);m.add(book,'原始.xlsx');const merged=m.finish();assert.equal(merged.output_rows,3);assert.equal(m.firstNG.get('a').defect,'AOI first');
  const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'下載.xlsx');const a=analyzeQuality(again);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.attribution[0].defect,'輸入首筆有效FAIL');assert.equal(a.attribution[0].order,'首次工單');
 });
+
+test('Scrap shares first-FAIL priority across dates and survives report reload with skipped-error audit',()=>{
+ const b=XLSX.utils.book_new(),bad=row('invalid','P','UNKNOWN',null),rows=[row('a','DAF外觀','GOOD','earlier GOOD',5),row('a','功能一測試','Scrap','first FAIL-class input',7),row('a','DAF外觀','FAIL','later FAIL input',3),row('b','DAF外觀',' scrap ',null),row('c','DAF外觀','GOOD',null),row('aoi','正面AOI','Scrap','excluded'),bad];
+ XLSX.utils.book_append_sheet(b,XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');const m=new DetailMerger(XLSX,{skipInvalidRows:true});m.add(b,'scrap.xlsx');const a=analyzeQuality(m);assert.equal(a.total,3);assert.equal(a.fail,2);assert.equal(a.yield,1/3);assert.equal(a.attribution.find(r=>r.serial==='a').defect,'first FAIL-class input');assert.equal(a.attribution.find(r=>r.serial==='a').status,'FAIL');assert.equal(a.attribution.find(r=>r.serial==='b').defect,'【未填不良項目】');assert.equal(a.orders[0].fail,2);
+ const merged=m.finish(),again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'saved.xlsx');const reanalysis=analyzeQuality(again);assert.equal(reanalysis.attribution.find(r=>r.serial==='a').defect,'first FAIL-class input');assert.equal(reanalysis.skippedRows.length,1);
+ const report=again.finish().book;appendQualitySheets(XLSX,report,reanalysis);assert.equal(report.Sheets['略過錯誤明細'].A2.v,'scrap.xlsx');assert.equal(report.Sheets['略過錯誤明細'].B2.v,8);assert.equal(report.Sheets['略過錯誤明細'].L2.v,'UNKNOWN');
+});
