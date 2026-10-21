@@ -46,7 +46,7 @@ $('match').onclick=async()=>{
     const item={name,blob,url:URL.createObjectURL(blob),detail:r.detail};downloads.push(item);
     await addLibraryFile(blob,{kind:'matched',detail:r.detail,rows:r['筆數'],sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});
    }
-   if(files.length===1)$('message').textContent=summary;
+   if(files.length===1)$('message').textContent=summary+(r['筆數']?'；已加入檔案庫，可勾選、取消勾選或刪除。':'');
   }catch(e){failed++;reports.push(file.name+'：'+e.message);if(files.length===1)error(e);}
   $('uploadResults').replaceChildren();if(reports.length){$('message').textContent=reports.join('；');$('message').className='warn';}
  }
@@ -55,7 +55,7 @@ $('match').onclick=async()=>{
   downloadUrl=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'}));
  }
  $('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
- if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案。`+(reports.length?' '+reports.join('；'):'');
+ if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案；已加入檔案庫 ${downloads.length} 份。`+(reports.length?' '+reports.join('；'):'');
  }catch(e){error(e);$('export').disabled=!downloads.length;}
  finally{$('match').disabled=false;$('file').disabled=false;endFileOperation();}
 };
