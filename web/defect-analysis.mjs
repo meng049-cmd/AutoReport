@@ -1,5 +1,6 @@
 export const dimensions=['product','date','process','defect'];
 export const dimensionNames={product:'產品',date:'日期',process:'製程',defect:'不良項目'};
+export function defectDimensions(first='product'){return ['product','defect','date'].includes(first)?[first,...dimensions.filter(key=>key!==first)]:[...dimensions];}
 const dayMs=86400000, iso=time=>new Date(time).toISOString().slice(0,10);
 export function calendarDates(start,end){const dates=[];for(let time=Date.parse(start+'T00:00:00Z'),last=Date.parse(end+'T00:00:00Z');Number.isFinite(time)&&time<=last;time+=dayMs)dates.push(iso(time));return dates;}
 export function periodKey(date,mode='day'){
@@ -30,8 +31,8 @@ export function cohortInput(analysis,filters={}){
  else {count=0;const totals=filters.process?analysis.dailyProcessTotals:analysis.dailyProductTotals;for(const [key,total] of totals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))count+=total;}}
  return count||0;
 }
-export function defectBreakdown(analysis,filters={},dates=[]){
- const records=attributedRows(analysis,filters),dimension=dimensions.find(key=>!filters[key])||null,groupMap=new Map();
+export function defectBreakdown(analysis,filters={},dates=[],order=dimensions){
+ const records=attributedRows(analysis,filters),dimension=order.find(key=>!filters[key])||null,groupMap=new Map();
  const ensure=(key,label)=>{if(!groupMap.has(key))groupMap.set(key,{key,label,count:0});return groupMap.get(key);};
  if(dimension==='product')for(const product of analysis.products)if(cohortInput(analysis,{...filters,product:product.id})||records.some(row=>row.product===product.id))ensure(product.id,product.ic+'／'+product.model);
  if(dimension==='date'){const start=filters.startDate||dates[0]||analysis.start_date,end=filters.endDate||dates.at(-1)||analysis.end_date;for(const bucket of calendarBuckets(start,end,filters.granularity))ensure(bucket.key,bucket.label);}
@@ -41,9 +42,9 @@ export function defectBreakdown(analysis,filters={},dates=[]){
  if(dimension!=='date')groups.sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label));
  return {dimension,groups,records,input:cohortInput(analysis,filters),count:records.length,contribution:analysis.total?records.length/analysis.total:0};
 }
-export function allDefectLevels(analysis,filters={}){
- const groups=new Map();for(const row of attributedRows(analysis,filters)){const path={};for(const dimension of dimensions){path[dimension]=dimension==='date'?periodKey(row.date,filters.granularity):row[dimension];const key=JSON.stringify(path),item=groups.get(key)||{...path,level:dimension,count:0,ic:row.ic,model:row.model};item.count++;groups.set(key,item);}}
- return [...groups.values()].map(row=>{const input=cohortInput(analysis,{...filters,...row});return {...row,input,rate:input?row.count/input:null,contribution:analysis.total?row.count/analysis.total:0};}).sort((a,b)=>a.ic.localeCompare(b.ic)||a.model.localeCompare(b.model)||(a.date||'').localeCompare(b.date||'')||(a.process||'').localeCompare(b.process||'')||(a.defect||'').localeCompare(b.defect||''));
+export function allDefectLevels(analysis,filters={},order=dimensions){
+ const groups=new Map();for(const row of attributedRows(analysis,filters)){const path={};for(const dimension of order){path[dimension]=dimension==='date'?periodKey(row.date,filters.granularity):row[dimension];const key=JSON.stringify(path),item=groups.get(key)||{...path,level:dimension,count:0,ic:path.product?row.ic:'全部產品',model:path.product?row.model:'全部機種'};item.count++;groups.set(key,item);}}
+ return [...groups.values()].map(row=>{const input=cohortInput(analysis,{...filters,...row});return {...row,input,rate:input?row.count/input:null,contribution:analysis.total?row.count/analysis.total:0};}).sort((a,b)=>{for(const key of order){const difference=(a[key]||'').localeCompare(b[key]||'');if(difference)return difference;}return 0;});
 }
 export function workOrderRows(analysis,filters={}){
  const groups=new Map();for(const row of attributedRows(analysis,filters)){const key=JSON.stringify([row.product,row.order||'']),group=groups.get(key)||{product:row.product,ic:row.ic,model:row.model,order:row.order||'【未填工單】',count:0,dates:new Set(),defects:new Set(),units:new Set()};group.count++;group.units.add(row.serial);group.dates.add(row.date);group.defects.add(row.defect);groups.set(key,group);}

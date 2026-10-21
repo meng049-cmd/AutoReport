@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries} from './defect-analysis.mjs';
+import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
@@ -57,4 +57,14 @@ test('multi-selected trend items retain exposure and blank dates; disabled items
  const analysis=fixture();analysis.start_date='2026-10-05';analysis.end_date='2026-10-08';const all=defectTrend(analysis),names=all.series.map(s=>s.defect),selected=selectTrendSeries(all,new Set(names.slice(0,2)));
  assert.equal(selected.series.length,2);assert.deepEqual(selected.dates.map(d=>d.input),all.dates.map(d=>d.input));assert.equal(selected.dates.at(-1).rate,null);for(const [i,date] of selected.dates.entries())assert.equal(date.count,selected.series.reduce((sum,s)=>sum+s.points[i].count,0));
  const visible=selectTrendSeries(selected,[selected.series[0].defect]);assert.equal(visible.series.length,1);assert.deepEqual(visible.dates.map(d=>d.input),all.dates.map(d=>d.input));assert.deepEqual(visible.dates.map(d=>d.count),visible.series[0].points.map(p=>p.count));const none=selectTrendSeries(all,[]);assert.equal(none.series.length,0);assert.equal(none.dates[0].count,0);assert.equal(none.dates.at(-1).rate,null);assert.equal(all.series.length,names.length);
+});
+
+test('product, defect and date first axes reconcile every drilldown and keep empty dates',()=>{
+ const analysis=fixture(),scope={startDate:'2026-10-05',endDate:'2026-10-08',granularity:'day'};
+ for(const first of ['product','defect','date']){const order=defectDimensions(first);assert.equal(order[0],first);assert.equal(new Set(order).size,4);const visit=(filters,depth)=>{const view=defectBreakdown(analysis,filters,[],order);assert.equal(view.dimension,order[depth]||null);if(!view.dimension)return;assert.equal(view.groups.reduce((sum,g)=>sum+g.count,0),view.count);assert.ok(Math.abs(view.groups.reduce((sum,g)=>sum+g.contribution,0)-view.contribution)<1e-12);for(const group of view.groups)if(group.count)visit({...filters,[view.dimension]:group.key},depth+1);};visit(scope,0);
+ const levels=allDefectLevels(analysis,scope,order),roots=levels.filter(row=>row.level===first),leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(roots.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);if(first!=='product')assert.ok(roots.every(row=>row.ic==='全部產品'&&row.model==='全部機種'));
+ }
+ const dates=defectBreakdown(analysis,scope,[],defectDimensions('date'));assert.deepEqual(dates.groups.map(row=>row.key),['2026-10-05','2026-10-06','2026-10-07','2026-10-08']);assert.equal(dates.groups.at(-1).input,0);assert.equal(dates.groups.at(-1).rate,null);
+ const defects=defectBreakdown(analysis,scope,[],defectDimensions('defect'));assert.equal(defects.groups[0].input,analysis.total);const firstDefect=defects.groups[0];assert.equal(defectBreakdown(analysis,{...scope,defect:firstDefect.key},[],defectDimensions('defect')).dimension,'product');
+ assert.deepEqual(defectDimensions('bad'),['product','date','process','defect']);
 });
