@@ -39,10 +39,12 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  const reportFile={name:'old-report.xlsx',mimeType:file.mimeType,buffer:Buffer.from(await report.xlsx.writeBuffer())};
  await showView(page,'#merge');await page.locator('#mergeFiles').setInputFiles(reportFile);await page.locator('#mergeDirect').click();await page.locator('#mergeResult').waitFor({state:'visible'});
  await showView(page,'#yield');await page.locator('#yieldFile').setInputFiles(reportFile);await page.locator('#yieldCalculate').click();await page.waitForFunction(()=>!document.querySelector('#yieldResult').hidden);
+ await page.waitForFunction(()=>new Promise(resolve=>{const request=indexedDB.open('AutoReport-analysis-cache',1);request.onsuccess=()=>{const db=request.result,read=db.transaction('results').objectStore('results').count();read.onsuccess=()=>{db.close();resolve(read.result>0);};};}));
  const other=await context.newPage();await other.goto(site);await other.waitForFunction(()=>!document.querySelector('#match').disabled);
  assert.notEqual(await other.locator('#orderCount').innerText(),'0');await showView(other,'#matching');await other.locator('#file').setInputFiles(reportFile);
  await showView(page,'#/database');page.once('dialog',dialog=>dialog.accept());await Promise.all([page.waitForEvent('domcontentloaded',{timeout:120000}),page.locator('#databaseClear').click()]);
  await page.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.startsWith('已清空本瀏覽器資料庫'),{},{timeout:120000});
+ assert.equal(await page.evaluate(()=>new Promise(resolve=>{const request=indexedDB.open('AutoReport-analysis-cache',1);request.onsuccess=()=>{const db=request.result,read=db.transaction('results').objectStore('results').count();read.onsuccess=()=>{db.close();resolve(read.result);};};})),0,'clearing browser data removes persisted analysis snapshots');
  assert.equal(await page.locator('#orderCount').innerText(),'0');assert.equal(await page.locator('#pairCount').innerText(),'0');
  assert.equal(await page.locator('#export').isDisabled(),true);
  await showView(page,'#/files');await page.locator('.imported-files summary').click();assert.equal(await page.locator('#uploadedFilesStatus').innerText(),'尚無匯入資料。');

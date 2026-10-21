@@ -1,9 +1,10 @@
+import {saveAnalysisCache} from './analysis-cache.mjs';
 import './navigation.mjs';
 import './file-library-ui.mjs';
 import {addLibraryFile,clearFileLibrary,beginFileOperation,endFileOperation,libraryIsBusy} from './file-library.mjs';
 import {MAX_BYTES} from './limits.mjs';
 import JSZip from 'jszip';
-import {mergeFiles,mergeFilesToBytes,clearMergedDownload} from './merge-ui.mjs';
+import {mergeFiles,clearMergedDownload} from './merge-ui.mjs';
 import {calculateYieldFile,getYieldOptions} from './yield-ui.mjs';
 import {renderQuality} from './quality-ui.mjs';
 import {setReferenceSources} from './report-context.mjs';
@@ -76,13 +77,10 @@ $('autoAnalyze').onclick=async()=>{
    $('message').textContent=`一鍵處理：整理比對結果 ${i+1}/${files.length}…`;
    const output=await call('export'),file=new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx'));matched.push(file);await addLibraryFile(file,{kind:'matched',sources:[{name:files[i].name,size:files[i].size,kind:'Detail'}],rows:result['筆數']});
   }
-  $('message').textContent='一鍵處理：合併並依網站規則去重…';
-  const options=getYieldOptions();const merged=await mergeFilesToBytes(matched,msg=>{$('message').textContent='一鍵處理：'+msg;},options);
-  const mergedFile=new File([merged.bytes],merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  await addLibraryFile(mergedFile,{kind:'merged',sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'})),rows:merged.output_rows});
-  $('message').textContent='一鍵處理：計算每日階段良率與不良分析…';
-  const report=await calculateYieldFile(mergedFile,msg=>{$('message').textContent='一鍵處理：'+msg;},{...options,sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
-  await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});
+  $('message').textContent='一鍵處理：合併並計算每日階段良率與不良分析…';
+  const report=await calculateYieldFile(matched,msg=>{$('message').textContent='一鍵處理：'+msg;},{...getYieldOptions(),includeMerged:true,sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
+  await addLibraryFile(new File([report.merged.bytes],report.merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),{kind:'merged',sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'})),rows:report.output_rows});
+  const saved=await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});void saveAnalysisCache(saved.id,report);
   if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;
   renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks,{url:downloadUrl,filename:report.filename});
