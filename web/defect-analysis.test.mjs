@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel} from './defect-analysis.mjs';
+import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
@@ -32,4 +32,23 @@ test('day, ISO week and month ranges retain empty dates and deduplicate inputs a
 
 test('week labels show month/day intervals and preserve cross-year boundaries',()=>{
  assert.equal(periodLabel('2026-W42','week'),'10/12–10/18');assert.equal(periodLabel('2020-W53','week'),'2020/12/28–2021/01/03');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/12–10/18');
+});
+
+
+test('order filters and yield use first-NG attribution without counting cross-order PPIDs twice as defects',()=>{
+ const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],row=(serial,order,process,day,status,defect,ic='A')=>[process,order,'p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
+ ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','O1','DAF外觀',5,'GOOD','early GOOD'),row('a','O2','功能一測試',6,'FAIL','first FAIL'),row('b','O1','DAF外觀',5,'FAIL','crack'),row('c','O1','DAF外觀',5,'GOOD',''),row('c','O1','DAF外觀',6,'GOOD',''),row('d','O2','功能一測試',7,'GOOD',''),row('f','O1','DAF外觀',6,'GOOD','dust','B'),row('aoi-only','O3','正面AOI',5,'FAIL','excluded'),row('g','RAW','DAF外觀',5,'GOOD',''),row('g','NG','DAF外觀',5,'GOOD','hidden original order')]),'Detail');merger.add(book,'orders.xlsx');const analysis=ctx.analyzeQuality(merger),scope={startDate:'2026-10-05',endDate:'2026-10-08',granularity:'day'},orders=orderYieldRows(analysis,scope);analysis.start_date=scope.startDate;analysis.end_date=scope.endDate;
+ assert.equal(analysis.total,6);assert.equal(analysis.fail,4);assert.equal(orders.reduce((sum,r)=>sum+r.fail,0),4);assert.equal(orders.find(r=>r.order==='O3'),undefined);assert.equal(orders.filter(r=>r.order==='O1').reduce((sum,r)=>sum+r.total,0),4);assert.equal(orders.filter(r=>r.order==='O1').reduce((sum,r)=>sum+r.fail,0),2);
+ assert.equal(orders.find(r=>r.order==='O2').yield,.5);assert.equal(cohortInput(analysis,{...scope,order:'O1'}),4);assert.equal(cohortInput(analysis,{...scope,order:'NG'}),1,'original first-NG work order remains an authentic input even when the visible row is from another order');assert.equal(orders.find(r=>r.order==='NG').fail,1);assert.equal(orders.find(r=>r.order==='RAW').fail,0);
+ assert.equal(attributedRows(analysis,{...scope,process:'功能一測試',order:'O2'})[0].defect,'first FAIL');assert.equal(attributedRows(analysis,{...scope,defect:'crack'})[0].serial,'b');
+ const trend=defectTrend(analysis,{...scope,order:'O2'});assert.deepEqual(trend.dates.map(d=>d.input),[0,1,1,0]);assert.deepEqual(trend.dates.map(d=>d.rate),[null,1,0,null]);assert.equal(trend.series.length,1);assert.deepEqual(trend.series[0].points.map(d=>d.rate),[null,1,0,null]);
+ const monthly=defectTrend(analysis,{...scope,order:'O1',granularity:'month'});assert.equal(monthly.dates[0].input,4);assert.equal(monthly.dates[0].rate,.5);assert.equal(monthly.series.reduce((sum,s)=>sum+s.points[0].rate,0),.5);
+ const productB=analysis.products.find(p=>p.ic==='B').id;assert.equal(defectTrend(analysis,{...scope,product:productB}).series[0].defect,'dust');assert.equal(defectTrend(analysis,{...scope,product:productB}).dates[1].rate,1);
+ const bytes=ctx.XLSX.write(merger.finish().book,{type:'array',bookType:'xlsx'}),again=new ctx.DetailMerger(ctx.XLSX);again.add(ctx.DetailMerger.readBook(ctx.XLSX,bytes),'again.xlsx');const reloaded=ctx.analyzeQuality(again);assert.equal(reloaded.orders.find(r=>r.order==='NG').fail,1);assert.equal(reloaded.orders.find(r=>r.order==='NG').total,1);
+ const report=ctx.XLSX.utils.book_new();ctx.appendQualitySheets(ctx.XLSX,report,analysis);assert.ok(report.Sheets['工單良率']);assert.equal(report.Sheets['工單良率'].A1.v,'工單');
+});
+
+test('work-order stage yields preserve the arithmetic mean of populated process yields',()=>{
+ const product=JSON.stringify(['IC','Model']),observations=[];for(const [process,items] of [['DAF外觀',[['a',true],['b',false]]],['DAF熱壓投入',[['c',false],['d',false],['e',false]]],['功能一測試',[['f',true]]]])for(const [serial,fail] of items)observations.push({product,date:'2026-10-05',order:'O1',process,serial,fail});
+ const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,.5);assert.equal(rows[1].value,null);
 });

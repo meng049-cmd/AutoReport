@@ -1,3 +1,4 @@
+import './navigation.mjs';
 import './file-library-ui.mjs';
 import {addLibraryFile,clearFileLibrary,beginFileOperation,endFileOperation,libraryIsBusy} from './file-library.mjs';
 import {MAX_BYTES} from './limits.mjs';
@@ -84,7 +85,7 @@ $('autoAnalyze').onclick=async()=>{
   await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});
   if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;
-  renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks);
+  renderQuality(report.analysis,report.start_date,report.end_date,report.stageChecks,{url:downloadUrl,filename:report.filename});
   $('message').textContent='一鍵流程完成。所有產出檔案已加入清單；完整報表可點擊下載。';$('message').className='ok';
  }catch(e){$('message').textContent=e.message;$('message').className='warn';}
  finally{button.disabled=false;$('match').disabled=false;$('file').disabled=false;$('mergeMatched').disabled=!downloads.some(d=>d.detail);$('export').disabled=!downloads.length;endFileOperation();}

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
-import {createStageChartWorkbook} from './chart-export.mjs';
+import {createStageChartWorkbook,createDefectTrendWorkbook} from './chart-export.mjs';
 
 test('editable stage-yield workbook includes native combo chart and preserves blank dates',async()=>{
  const stage={key:'SMT',title:'SMT',target:.995,color:'F4B400'};
@@ -23,4 +23,11 @@ test('native chart and plotted PNG snapshot coexist with notes and source files'
  const nativeDrawing=await zip.file('xl/drawings/drawing2.xml').async('string');assert.match(nativeDrawing,/<c:chart/);assert.match(await zip.file('xl/drawings/drawing1.xml').async('string'),/<xdr:pic>/);assert.doesNotMatch(await zip.file('xl/drawings/drawing1.xml').async('string'),/<xdr:oneCellAnchor[^>]*editAs/);
  assert.doesNotMatch(await zip.file('xl/charts/chart1.xml').async('string'),/val="#d54545"/);
  const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);assert.ok(book.getWorksheet('已產生圖表'));assert.ok(book.getWorksheet('統計說明'));assert.equal(book.getWorksheet('資料來源').getCell('B2').value,'來源.xlsx');assert.equal(book.getWorksheet('資料來源').getCell('B3').value,'對照.xlsx');assert.equal(book.getWorksheet('已產生圖表').getImages().length,1);
+});
+
+
+test('defect trend export has editable multi-series native lines, exact denominators and blank-date gaps',async()=>{
+ const dates=[{key:'2026-10-05',label:'2026-10-05',input:100,count:3,rate:.03},{key:'2026-10-06',label:'2026-10-06',input:0,count:0,rate:null},{key:'2026-10-07',label:'2026-10-07',input:50,count:1,rate:.02}],series=[{defect:'裂痕',color:'#117b73',points:dates.map((d,i)=>({...d,count:i===0?1:0,rate:d.input?(i===0?.01:0):null}))},{defect:'異物',color:'#d54545',points:dates.map((d,i)=>({...d,count:i===0?2:i===2?1:0,rate:d.input?.02:null}))}],snapshot='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+ const bytes=await createDefectTrendWorkbook({dates,series},{snapshot,sources:[{name:'trend.xlsx'}]}),zip=await JSZip.loadAsync(bytes),xml=await zip.file('xl/charts/chart1.xml').async('string');assert.match(xml,/<c:lineChart>/);assert.match(xml,/<c:symbol val="circle"\/>/);assert.doesNotMatch(xml,/<c:barChart>/);assert.equal((xml.match(/<c:ser>/g)||[]).length,2);assert.match(xml,/不良率推移'!\$B\$2:\$B\$4/);assert.match(xml,/不良率推移'!\$C\$2:\$C\$4/);assert.match(xml,/<c:dispBlanksAs val="gap"/);assert.match(xml,/117b73/);assert.match(xml,/d54545/);
+ const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('不良率推移');assert.equal(sheet.getCell('B1').value,'裂痕');assert.equal(sheet.getCell('C1').value,'異物');assert.equal(sheet.getCell('A3').value,'2026-10-06');assert.equal(sheet.getCell('B3').value,null);assert.equal(sheet.getCell('C3').value,null);assert.equal(sheet.getCell('C4').value,.02);assert.equal(book.getWorksheet('日期投入').getCell('B2').value,100);assert.equal(book.getWorksheet('已產生圖表').getImages().length,1);assert.ok(book.getWorksheet('推移明細'));
 });
