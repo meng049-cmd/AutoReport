@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries} from './defect-analysis.mjs';
+import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
@@ -51,4 +51,10 @@ test('order filters and yield use first-NG attribution without counting cross-or
 test('work-order stage yields preserve the arithmetic mean of populated process yields',()=>{
  const product=JSON.stringify(['IC','Model']),observations=[];for(const [process,items] of [['DAF外觀',[['a',true],['b',false]]],['DAF熱壓投入',[['c',false],['d',false],['e',false]]],['功能一測試',[['f',true]]]])for(const [serial,fail] of items)observations.push({product,date:'2026-10-05',order:'O1',process,serial,fail});
  const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,.5);assert.equal(rows[1].value,null);
+});
+
+test('multi-selected trend items retain exposure and blank dates; disabled items are excluded from exported totals',()=>{
+ const analysis=fixture();analysis.start_date='2026-10-05';analysis.end_date='2026-10-08';const all=defectTrend(analysis),names=all.series.map(s=>s.defect),selected=selectTrendSeries(all,new Set(names.slice(0,2)));
+ assert.equal(selected.series.length,2);assert.deepEqual(selected.dates.map(d=>d.input),all.dates.map(d=>d.input));assert.equal(selected.dates.at(-1).rate,null);for(const [i,date] of selected.dates.entries())assert.equal(date.count,selected.series.reduce((sum,s)=>sum+s.points[i].count,0));
+ const visible=selectTrendSeries(selected,[selected.series[0].defect]);assert.equal(visible.series.length,1);assert.deepEqual(visible.dates.map(d=>d.input),all.dates.map(d=>d.input));assert.deepEqual(visible.dates.map(d=>d.count),visible.series[0].points.map(p=>p.count));const none=selectTrendSeries(all,[]);assert.equal(none.series.length,0);assert.equal(none.dates[0].count,0);assert.equal(none.dates.at(-1).rate,null);assert.equal(all.series.length,names.length);
 });

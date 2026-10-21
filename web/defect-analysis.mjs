@@ -68,6 +68,11 @@ export function defectTrend(analysis,filters={}){
  const series=[...items].sort().map(defect=>({defect,points:dates.map(b=>({...b,count:counts.get(defect)?.get(b.key)||0,rate:b.input?(counts.get(defect)?.get(b.key)||0)/b.input:null}))}));
  return {dates,series};
 }
+export function selectTrendSeries(trend,names){
+ const selected=names==null?null:new Set(names),series=trend.series.filter(item=>selected==null||selected.has(item.defect));
+ const dates=trend.dates.map((date,index)=>{const count=series.reduce((sum,item)=>sum+(item.points[index]?.count||0),0);return {...date,count,rate:date.input?count/date.input:null};});
+ return {...trend,dates,series};
+}
 export function orderStageSeries(analysis,stage,filters={},dates=[]){
  const processes=stage==='前段'?['DAF外觀','DAF熱壓投入','功能一測試']:['功能二測試','外觀檢查點亮測試','輝度機測試'],groups=new Map();
  for(const row of filteredObservations(analysis,{...filters,date:'',process:'',defect:''})){if(!processes.includes(row.process))continue;const key=JSON.stringify([row.date,row.product,row.process]),g=groups.get(key)||{date:row.date,product:row.product,units:new Map()};g.units.set(row.serial,Boolean(g.units.get(row.serial)||row.fail));groups.set(key,g);}
