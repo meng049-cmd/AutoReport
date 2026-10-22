@@ -14,8 +14,9 @@ export const libraryReady=new Promise(resolve=>{
 function changed(){libraryEvents.dispatchEvent(new Event('change'));}
 function write(mode,action){return new Promise((resolve,reject)=>{if(!db){reject(Error('檔案清單暫存於此分頁'));return;}const tx=db.transaction('files',mode);action(tx.objectStore('files'));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
 export function listLibraryFiles(){return [...entries.values()].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));}
-export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null}={}){
- await libraryReady;const entry={id:crypto.randomUUID(),name:file.name,blob:file,size:file.size,kind,detail,sources,rows,createdAt:new Date().toISOString(),persistent:true};
+export function libraryCollection(entry){return ['detail','analysis'].includes(entry.collection)?entry.collection:['analysis','input'].includes(entry.kind)?'analysis':'detail';}
+export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null,collection,sourceFileId}={}){
+ await libraryReady;const entry={id:crypto.randomUUID(),name:file.name,blob:file,size:file.size,kind,detail,sources,rows,collection:libraryCollection({kind,collection}),sourceFileId,createdAt:new Date().toISOString(),persistent:true};
  try{await write('readwrite',store=>store.put(entry));}catch{entry.persistent=false;}
  entries.set(entry.id,entry);changed();return entry;
 }

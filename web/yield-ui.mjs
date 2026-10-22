@@ -20,7 +20,7 @@ export async function analyzeYieldFiles(files,context={}){
   progress('正在載入分析結果…');const cached=await getAnalysisCache({reportId,selectionKey});const cachedFile=cached&&entries.get(cached.reportId);
   if(cachedFile){showReport(cached.data,cached.downloadBlob||cachedFile.blob,cached.data.filename,progress,'已開啟已儲存的分析結果。');return;}
   const data=await calculateYieldFile(files,progress,{...options,includeMerged:files.length>1,...(context.sources?{sources:context.sources}:{})});
-  if(data.merged)await addLibraryFile(new File([data.merged.bytes],data.merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),{kind:'merged',sources,rows:data.merged.output_rows});
+  if(data.merged)await addLibraryFile(new File([data.merged.bytes],data.merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),{kind:'merged',collection:'analysis',sources,rows:data.merged.output_rows});
   if(!context.fromLibrary)for(const input of files)await addLibraryFile(input,{kind:'input',sources:[{name:input.name,size:input.size,kind:'Detail'}]});
   const report=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});let savedId=context.reportId;
   if(context.saveReport!==false){const entry=await addLibraryFile(report,{kind:'analysis',sources:data.analysis.sources,rows:data.output_rows});savedId=entry.id;}

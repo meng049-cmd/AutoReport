@@ -1,3 +1,4 @@
+import {libraryCollection} from './file-library.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {analysisSelectionKey,getAnalysisCache,saveAnalysisCache,clearAnalysisCaches,removeAnalysisCaches} from './analysis-cache.mjs';
 test('completed analysis cache respects ordered immutable file IDs, skip mode and calculation version, without retaining XLSX buffers',async()=>{
@@ -9,4 +10,8 @@ test('completed analysis cache respects ordered immutable file IDs, skip mode an
  globalThis.__ANALYSIS_VERSION__='test-v2';assert.equal(await getAnalysisCache({reportId:'report'}),null);globalThis.__ANALYSIS_VERSION__='test-v1';
  await removeAnalysisCaches(['a']);assert.equal(await getAnalysisCache({selectionKey:key}),null);assert.ok(await getAnalysisCache({reportId:'report'}),'deleting a source does not invalidate an immutable finished report');await removeAnalysisCaches(['report']);assert.equal(await getAnalysisCache({reportId:'report'}),null);
  await saveAnalysisCache('other',data,{selectionKey:key,inputIds:['a','b']});await clearAnalysisCaches();assert.equal(await getAnalysisCache({reportId:'other'}),null);assert.equal(await getAnalysisCache({selectionKey:key}),null);
+});
+
+test('legacy library entries retain their files while analysis inputs and reports are separated from Detail outputs',()=>{
+ assert.equal(libraryCollection({kind:'matched'}),'detail');assert.equal(libraryCollection({kind:'matched',detail:false}),'detail');assert.equal(libraryCollection({kind:'merged'}),'detail');assert.equal(libraryCollection({kind:'input'}),'analysis');assert.equal(libraryCollection({kind:'analysis'}),'analysis');assert.equal(libraryCollection({kind:'merged',collection:'analysis'}),'analysis');assert.equal(libraryCollection({kind:'analysis',collection:'unknown'}),'analysis');
 });

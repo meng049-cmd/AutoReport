@@ -104,4 +104,4 @@ window.addEventListener('resize',scheduleLayoutRender);for(const stage of stages
 
 window.addEventListener('viewchange',({detail})=>{if(detail.page==='quality'&&analysis)scheduleLayoutRender();});
 
-$('qualityFiles').onclick=()=>navigate('reports');
+$('qualityFiles').onclick=()=>window.dispatchEvent(new Event('library-reports'));
