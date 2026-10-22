@@ -47,6 +47,7 @@ test('web Excel update persists, deduplicates, preserves conflicts and downloads
  assert.equal(await page.evaluate(()=>new Promise(resolve=>{const request=indexedDB.open('AutoReport-analysis-cache',1);request.onsuccess=()=>{const db=request.result,read=db.transaction('results').objectStore('results').count();read.onsuccess=()=>{db.close();resolve(read.result);};};})),0,'clearing browser data removes persisted analysis snapshots');
  assert.equal(await page.locator('#orderCount').innerText(),'0');assert.equal(await page.locator('#pairCount').innerText(),'0');
  assert.equal(await page.locator('#export').isDisabled(),true);
+ await showView(page,'#/raw');assert.equal(await page.locator('#libraryCount').innerText(),'0 份檔案');assert.equal(await page.locator('#fileLibraryTable tbody tr').count(),0,'clear also deletes original raw file blobs');
  await showView(page,'#/files');await page.locator('.imported-files summary').click();assert.equal(await page.locator('#uploadedFilesStatus').innerText(),'尚無匯入資料。');
  for(const target of [page,other]){
   await target.waitForFunction(()=>document.querySelector('#databaseStatus')?.textContent.startsWith('已清空本瀏覽器資料庫'));

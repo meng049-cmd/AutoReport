@@ -1,6 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
 import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
+test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
+ const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
+ const row=(serial,process,day,status='GOOD',defect='')=>[process,'O','p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,'IC','Model'];
+ ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('shared','正面AOI',12,'FAIL','AOI defect'),row('shared','DAF外觀',12),row('shared','功能一測試',12,'FAIL','eligible defect'),row('shared','功能一測試',13),row('only-AOI','背面AOI',12,'FAIL','excluded'),row('good','DAF外觀',12)]),'Detail');merger.add(book,'raw.xlsx');
+ const analysis=ctx.analyzeQuality(merger),scope={startDate:'2026-10-12',endDate:'2026-10-14'};
+ assert.equal(analysis.total,2);assert.equal(analysis.fail,1);assert.equal(analysis.attribution[0].defect,'eligible defect');assert.ok(analysis.observations.every(row=>!row.process.includes('AOI')));
+ const daily=defectTrend(analysis,scope);assert.deepEqual(daily.dates.map(d=>d.input),[2,1,0]);assert.deepEqual(daily.dates.map(d=>d.rate),[.5,0,null]);
+ const front=defectTrend(analysis,{...scope,process:'DAF外觀'}),test=defectTrend(analysis,{...scope,process:'功能一測試'});assert.equal(front.dates[0].input,2);assert.equal(test.dates[0].input,1);assert.equal(daily.dates[0].input,2,'combined input is a union, not 2 + 1');
+ for(const granularity of ['week','month']){const period=defectTrend(analysis,{...scope,granularity});assert.equal(period.dates[0].input,2);assert.equal(period.dates[0].count,1);assert.equal(period.dates[0].rate,.5);}
+ assert.equal(defectTrend(analysis,{...scope,process:'正面AOI'}).dates[0].input,0);
+});
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
  ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','P1',5,'GOOD','GOOD defect'),row('a','P2',6,'FAIL','first FAIL'),row('b','P1',5,'GOOD',null),row('c','P1',5,'FAIL','crack'),row('c','P2',5,'FAIL','later'),row('d','P1',5,'FAIL','dust','B'),row('e','P1',7,'GOOD',null,'B')]),'Detail');m.add(book,'原始.xlsx');return ctx.analyzeQuality(m);}

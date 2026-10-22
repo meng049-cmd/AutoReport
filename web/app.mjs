@@ -28,11 +28,15 @@ async function query(fulltext=false){
  else{const r=await call('query',{query:q,kind:$('kind').value});$('searchResults').innerHTML='<p class="'+(r['狀態']==='唯一匹配'?'ok':'warn')+'">'+esc(r['狀態'])+'</p>'+candidates(r['候選']);}}catch(e){error(e)}
 }
 $('queryForm').onsubmit=e=>{e.preventDefault();query()};$('fulltext').onclick=()=>query(true);
-$('match').onclick=async()=>{
- const files=Array.from($('file').files);if(!files.length){error(Error('請先選擇檔案。'));return;}
+async function archiveRawFiles(files){
+ for(const file of files)if(file.size<=MAX_BYTES)await addLibraryFile(file,{kind:'raw',collection:'raw',detail:false,sources:[{name:file.name,size:file.size,kind:'比對前原始檔'}]});
+}
+async function matchFiles(files,{archive=true}={}){
+ if(!files.length){error(Error('請先選擇檔案。'));return;}
  if(!beginFileOperation())return;$('match').disabled=true;$('file').disabled=true;clearDownload();$('uploadResults').innerHTML='';$('message').className='';
  const used=new Set();let failed=0,total=0;const reports=[];
  try{
+ if(archive)await archiveRawFiles(files);
  for(let index=0;index<files.length;index++){
   const file=files[index];$('message').textContent=`正在處理 ${index+1}/${files.length}：${file.name}`;
   try{
@@ -60,7 +64,9 @@ $('match').onclick=async()=>{
  if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案；已加入檔案庫 ${downloads.length} 份。`+(reports.length?' '+reports.join('；'):'');
  }catch(e){error(e);$('export').disabled=!downloads.length;}
  finally{$('match').disabled=false;$('file').disabled=false;endFileOperation();}
-};
+}
+$('match').onclick=()=>matchFiles(Array.from($('file').files));
+window.addEventListener('library-match',({detail:{files}})=>matchFiles(files,{archive:false}));
 $('mergeMatched').onclick=()=>mergeFiles(downloads.filter(d=>d.detail).map(d=>new File([d.blob],d.name)),{matched:true});
 $('autoAnalyze').onclick=async()=>{
  const files=Array.from($('file').files);if(!files.length){error(Error('請先選擇含 Detail 分頁的 Excel。'));return;}
@@ -69,6 +75,7 @@ $('autoAnalyze').onclick=async()=>{
  if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;
  $('uploadResults').replaceChildren();$('matchedMergeResult').hidden=true;$('autoResult').hidden=true;$('message').className='';
  try{
+  await archiveRawFiles(files);
   const matched=[];
   for(let i=0;i<files.length;i++){
    $('message').textContent=`一鍵處理：比對檔案 ${i+1}/${files.length}…`;
