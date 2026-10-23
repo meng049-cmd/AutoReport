@@ -35,3 +35,7 @@ test('defect trend export has editable multi-series native lines, exact denomina
 test('stage chart workbook uses editable AGGREGATE formulas sourced from only its three processes',async()=>{
  const rows=[{date:'2026-06-02',value:.5,processRows:[{process:'DAF熱壓投入',value:1},{process:'DAF外觀',value:0},{process:'功能一測試',value:.5}]},{date:'2026-06-03',value:null,processRows:[]}],bytes=await createStageChartWorkbook({key:'前段',title:'前段',target:.985,color:'#d54545'},rows),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const value=book.getWorksheet('每日階段良率').getCell('B2').value;assert.match(value.formula,/AGGREGATE\(1,6/);assert.equal(value.result,.5);assert.equal(book.getWorksheet('製程良率資料').getCell('C2').value,0);assert.equal(book.getWorksheet('每日階段良率').getCell('B3').value,null);
 });
+
+test('defect chart workbook computes plotted rates from its owning process input and bad PPID cells',async()=>{
+ const rows=[{date:'CG內異物 · DAF外觀',value:.5},{date:'CG內異物 · 功能一測試',value:.2}],bytes=await createStageChartWorkbook({kind:'defect',title:'製程內不良項目不良率',sheetName:'不良率貢獻',target:0,color:'#d54545'},rows,{inputCounts:[2,5],badCounts:[1,1]}),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('不良率貢獻');assert.equal(sheet.getCell('D2').value,2);assert.equal(sheet.getCell('D3').value,5);assert.equal(sheet.getCell('E2').value,1);assert.equal(sheet.getCell('B2').value.formula,'IFERROR(E2/D2,"")');assert.equal(sheet.getCell('B2').value.result,.5);assert.equal(sheet.getCell('B3').value.result,.2);
+});

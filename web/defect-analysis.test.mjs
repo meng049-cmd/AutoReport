@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
+import {dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
@@ -78,6 +78,28 @@ test('product, defect and date first axes reconcile every drilldown and keep emp
  const levels=allDefectLevels(analysis,scope,order),roots=levels.filter(row=>row.level===first),leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(roots.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);if(first!=='product')assert.ok(roots.every(row=>row.ic==='全部產品'&&row.model==='全部機種'));
  }
  const dates=defectBreakdown(analysis,scope,[],defectDimensions('date'));assert.deepEqual(dates.groups.map(row=>row.key),['2026-10-05','2026-10-06','2026-10-07','2026-10-08']);assert.equal(dates.groups.at(-1).input,0);assert.equal(dates.groups.at(-1).rate,null);
- const defects=defectBreakdown(analysis,scope,[],defectDimensions('defect'));assert.equal(defects.groups[0].input,analysis.total);const firstDefect=defects.groups[0];assert.equal(defectBreakdown(analysis,{...scope,defect:firstDefect.key},[],defectDimensions('defect')).dimension,'product');
+ const defects=defectBreakdown(analysis,scope,[],defectDimensions('defect'));assert.equal(defects.groups[0].input,cohortInput(analysis,{...scope,process:defects.groups[0].process}));const firstDefect=defects.groups[0];assert.equal(defectBreakdown(analysis,{...scope,defect:firstDefect.key},[],defectDimensions('defect')).dimension,'product');
  assert.deepEqual(defectDimensions('bad'),['product','date','process','defect']);
+});
+
+function sharedDefectFixture(){
+ const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX),row=(serial,process,status,ic='A',day=5,order='o')=>[process,order,'p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',status==='FAIL'?'CG內異物':'',status,ic,'Model'];
+ ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','P1','FAIL'),row('b','P1','GOOD'),row('c','P2','FAIL','B'),row('d','P2','GOOD','B'),row('e','P2','GOOD'),row('f','P2','GOOD','A',5,'other'),row('b','P2','GOOD'),row('g','P3','GOOD'),row('a','P1','GOOD','A',6),row('b','P1','GOOD','A',6)]),'Detail');merger.add(book,'same-defect.xlsx');return ctx.analyzeQuality(merger);
+}
+test('defect-first groups split the same name by process and use all good and bad inputs of that process',()=>{
+ const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},order=defectDimensions('defect'),view=defectBreakdown(analysis,scope,[],order),p1=view.groups.find(g=>g.process==='P1'),p2=view.groups.find(g=>g.process==='P2');
+ assert.equal(analysis.total,7);assert.equal(view.groups.length,2);assert.equal(p1.input,2);assert.equal(p1.rate,.5);assert.equal(p2.input,5);assert.equal(p2.rate,.2);assert.equal(p1.contribution,1/7);assert.equal(p2.contribution,1/7);assert.notEqual(p1.key,p2.key);assert.deepEqual(parseDefectKey(p1.key),{process:'P1',defect:'CG內異物'});assert.equal(defectFilterLabel(p1.key),'CG內異物 · P1');
+ const next=defectBreakdown(analysis,{...scope,defect:p1.key},[],order);assert.equal(next.dimension,'product');assert.equal(next.input,2);assert.equal(next.count,1);assert.equal(next.records[0].process,'P1');assert.ok(next.groups.every(g=>g.input<=2));
+ assert.equal(cohortInput(analysis,{...scope,defect:p1.key,process:'P2'}),0);assert.equal(attributedRows(analysis,{...scope,defect:p1.key,process:'P2'}).length,0);
+});
+test('defect ownership persists across product/date drilldowns, order filters and week/month unique PPID counting',()=>{
+ const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},key=defectKey('P2','CG內異物'),order=defectDimensions('defect'),product=analysis.products.find(p=>p.ic==='B').id;
+ assert.equal(cohortInput(analysis,{...scope,defect:key}),5);assert.equal(cohortInput(analysis,{...scope,defect:key,order:'o'}),4);assert.equal(cohortInput(analysis,{...scope,defect:key,product}),2);
+ const next=defectBreakdown(analysis,{...scope,defect:key,product},[],order);assert.equal(next.dimension,'date');assert.deepEqual(next.groups.map(g=>g.input),[2,0]);assert.equal(next.groups[0].rate,.5);assert.equal(next.groups[1].rate,null);
+ for(const granularity of ['week','month']){const view=defectBreakdown(analysis,{...scope,granularity},[],order);assert.equal(view.groups.find(g=>g.process==='P1').input,2);assert.equal(view.groups.find(g=>g.process==='P2').input,5);}
+});
+test('exported complete hierarchies carry process ownership before the process level and reconcile global contributions',()=>{
+ const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'};
+ for(const first of ['defect','product','date']){const order=defectDimensions(first),levels=allDefectLevels(analysis,scope,order);for(const row of levels)if(row.defect)assert.equal(row.input,cohortInput(analysis,{...scope,...row,process:row.process||row.defectProcess}));const leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),2);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);}
+ const roots=allDefectLevels(analysis,scope,defectDimensions('defect')).filter(row=>row.level==='defect');assert.deepEqual(roots.map(row=>[row.defectProcess,row.input]).sort(),[['P1',2],['P2',5]]);
 });

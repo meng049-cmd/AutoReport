@@ -2,6 +2,17 @@ import {isStageProcess,summarizeStage} from './stage-metrics.mjs';
 export const dimensions=['product','date','process','defect'];
 export const dimensionNames={product:'產品',date:'日期',process:'製程',defect:'不良項目'};
 export function defectDimensions(first='product'){if(first==='date')return ['date','process','defect','product'];return ['product','defect'].includes(first)?[first,...dimensions.filter(key=>key!==first)]:[...dimensions];}
+const defectPrefix='process-defect:';
+export const defectKey=(process,defect)=>defectPrefix+JSON.stringify([process,defect]);
+export function parseDefectKey(value){
+ if(typeof value!=='string'||!value.startsWith(defectPrefix))return null;
+ try{const pair=JSON.parse(value.slice(defectPrefix.length));if(Array.isArray(pair)&&pair.length===2&&pair.every(item=>typeof item==='string'))return {process:pair[0],defect:pair[1]};}catch{}return null;
+}
+export function defectFilterLabel(value){const item=parseDefectKey(value);return item?item.defect+' · '+item.process:value||'';}
+function processScope(filters){const item=parseDefectKey(filters.defect);return item?{...filters,defect:item.defect,process:filters.process||item.process,invalidProcess:Boolean(filters.process&&filters.process!==item.process)}:filters;}
+export function defectOptions(analysis,filters={}){
+ const map=new Map();for(const row of attributedRows(analysis,{...filters,defect:''})){const key=defectKey(row.process,row.defect);map.set(key,[key,row.defect+' · '+row.process]);}return [...map.values()].sort((a,b)=>a[1].localeCompare(b[1]));
+}
 const dayMs=86400000, iso=time=>new Date(time).toISOString().slice(0,10);
 export function calendarDates(start,end){const dates=[];for(let time=Date.parse(start+'T00:00:00Z'),last=Date.parse(end+'T00:00:00Z');Number.isFinite(time)&&time<=last;time+=dayMs)dates.push(iso(time));return dates;}
 export function periodKey(date,mode='day'){
@@ -20,11 +31,12 @@ export function calendarBuckets(start,end,mode='day'){
  const map=new Map();for(const date of calendarDates(start,end)){const key=periodKey(date,mode);if(!map.has(key))map.set(key,{key,label:periodLabel(key,mode),...periodBounds(key,mode)});}return [...map.values()];
 }
 export const orderName=value=>String(value??'').trim()||'【未填工單】';
-function matches(row,filters,ignoreDefect=false){return (!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
-export function attributedRows(analysis,filters={}){return analysis.attribution.filter(row=>matches(row,filters));}
-export function filteredObservations(analysis,filters={}){return (analysis.observations||[]).filter(row=>matches(row,filters,true));}
+function matches(row,filters,ignoreDefect=false){return !filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
+export function attributedRows(analysis,filters={}){const scope=processScope(filters);return analysis.attribution.filter(row=>matches(row,scope));}
+export function filteredObservations(analysis,filters={}){const scope=processScope(filters);return (analysis.observations||[]).filter(row=>matches(row,scope,true));}
 const cohortCaches=new WeakMap();
 export function cohortInput(analysis,filters={}){
+ filters=processScope(filters);if(filters.invalidProcess)return 0;
  let cache=cohortCaches.get(analysis);if(!cache){cache=new Map();cohortCaches.set(analysis,cache);}
  const rangeKey=JSON.stringify([filters.startDate||'',filters.endDate||'',filters.granularity||'day',filters.order||'',filters.stage||'']);
  if(analysis.observations){let totals=cache.get(rangeKey);if(!totals){const sets=new Map();for(const row of analysis.observations){if(filters.stage&&!isStageProcess(row.process,filters.stage))continue;if(filters.order&&orderName(row.order)!==filters.order)continue;if((filters.startDate&&row.date<filters.startDate)||(filters.endDate&&row.date>filters.endDate))continue;const bucket=periodKey(row.date,filters.granularity);for(const product of ['',row.product])for(const date of ['',bucket])for(const process of ['',row.process]){const key=JSON.stringify([product,date,process]);let set=sets.get(key);if(!set){set=new Set();sets.set(key,set);}set.add(row.serial);}}totals=new Map([...sets].map(([key,set])=>[key,set.size]));cache.set(rangeKey,totals);}return totals.get(JSON.stringify([filters.product||'',filters.date||'',filters.process||'']))||0;}
@@ -34,6 +46,7 @@ export function cohortInput(analysis,filters={}){
 }
 const dateAuditCaches=new WeakMap();
 export function dateInputAudits(analysis,filters={}){
+ filters=processScope(filters);
  let cache=dateAuditCaches.get(analysis);if(!cache){cache=new Map();dateAuditCaches.set(analysis,cache);}
  const key=JSON.stringify([filters.startDate,filters.endDate,filters.granularity||'day',filters.product||'',filters.order||'',filters.process||'',filters.stage||'']);if(cache.has(key))return cache.get(key);
  const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),sets=new Map(buckets.map(bucket=>[bucket.key,{units:new Set(),processes:new Map()}]));
@@ -42,18 +55,18 @@ export function dateInputAudits(analysis,filters={}){
 }
 export function defectBreakdown(analysis,filters={},dates=[],order=dimensions){
  const records=attributedRows(analysis,filters),dimension=order.find(key=>!filters[key])||null,groupMap=new Map();
- const ensure=(key,label)=>{if(!groupMap.has(key))groupMap.set(key,{key,label,count:0});return groupMap.get(key);};
+ const ensure=(key,label,meta={})=>{if(!groupMap.has(key))groupMap.set(key,{key,label,count:0,...meta});return groupMap.get(key);};
  if(dimension==='product')for(const product of analysis.products)if(cohortInput(analysis,{...filters,product:product.id})||records.some(row=>row.product===product.id))ensure(product.id,product.ic+'／'+product.model);
  if(dimension==='date'){const start=filters.startDate||dates[0]||analysis.start_date,end=filters.endDate||dates.at(-1)||analysis.end_date;for(const bucket of calendarBuckets(start,end,filters.granularity))ensure(bucket.key,bucket.label);}
  if(dimension==='process'){if(analysis.observations)for(const row of filteredObservations(analysis,filters))ensure(row.process,row.process);else for(const [key] of analysis.dailyProcessTotals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))ensure(process,process);}}
- for(const row of records)if(dimension){const key=dimension==='date'?periodKey(row.date,filters.granularity):row[dimension];ensure(key,dimension==='product'?row.ic+'／'+row.model:key).count++;}
+ for(const row of records)if(dimension){const key=dimension==='date'?periodKey(row.date,filters.granularity):dimension==='defect'?defectKey(row.process,row.defect):row[dimension],label=dimension==='product'?row.ic+'／'+row.model:dimension==='defect'?row.defect+(filters.process?'':' · '+row.process):key;ensure(key,label,dimension==='defect'?{process:row.process,defect:row.defect}:{}).count++;}
  const groups=[...groupMap.values()].map(group=>{const input=cohortInput(analysis,{...filters,[dimension]:group.key});return {...group,input,rate:input?group.count/input:null,contribution:analysis.total?group.count/analysis.total:0};});
  if(dimension!=='date')groups.sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label));
  return {dimension,groups,records,input:cohortInput(analysis,filters),count:records.length,contribution:analysis.total?records.length/analysis.total:0};
 }
 export function allDefectLevels(analysis,filters={},order=dimensions){
- const groups=new Map();for(const row of attributedRows(analysis,filters)){const path={};for(const dimension of order){path[dimension]=dimension==='date'?periodKey(row.date,filters.granularity):row[dimension];const key=JSON.stringify(path),item=groups.get(key)||{...path,level:dimension,count:0,ic:path.product?row.ic:'全部產品',model:path.product?row.model:'全部機種'};item.count++;groups.set(key,item);}}
- return [...groups.values()].map(row=>{const input=cohortInput(analysis,{...filters,...row});return {...row,input,rate:input?row.count/input:null,contribution:analysis.total?row.count/analysis.total:0};}).sort((a,b)=>{for(const key of order){const difference=(a[key]||'').localeCompare(b[key]||'');if(difference)return difference;}return 0;});
+ const groups=new Map();for(const row of attributedRows(analysis,filters)){const path={};for(const dimension of order){path[dimension]=dimension==='date'?periodKey(row.date,filters.granularity):row[dimension];if(dimension==='defect')path.defectProcess=row.process;const key=JSON.stringify(path),item=groups.get(key)||{...path,level:dimension,count:0,ic:path.product?row.ic:'全部產品',model:path.product?row.model:'全部機種'};item.count++;groups.set(key,item);}}
+ return [...groups.values()].map(row=>{const input=cohortInput(analysis,{...filters,...row,process:row.process||row.defectProcess||filters.process});return {...row,input,rate:input?row.count/input:null,contribution:analysis.total?row.count/analysis.total:0};}).sort((a,b)=>{for(const key of order){const difference=(a[key]||'').localeCompare(b[key]||'');if(difference)return difference;}return 0;});
 }
 export function workOrderRows(analysis,filters={}){
  const groups=new Map();for(const row of attributedRows(analysis,filters)){const key=JSON.stringify([row.product,row.order||'']),group=groups.get(key)||{product:row.product,ic:row.ic,model:row.model,order:row.order||'【未填工單】',count:0,dates:new Set(),defects:new Set(),units:new Set()};group.count++;group.units.add(row.serial);group.dates.add(row.date);group.defects.add(row.defect);groups.set(key,group);}
