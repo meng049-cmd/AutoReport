@@ -7,21 +7,22 @@ function table(headers,rows){const scroll=document.createElement('div');scroll.c
 export function stageFormulaContent(view){
  const host=document.createElement('div');host.className='stage-formula-content';const {parent,dimension,groups}=view;
  if(dimension==='process'){
-  text(host,'所有層級以實際片數計算：N = 範圍內唯一投入 PPID，B = 同範圍任一紀錄不良的唯一 PPID，G = N − B，良率 Y = G ÷ N。FAIL／Scrap 或有不良項目的 GOOD 均計不良。');
+  text(host,'每個製程與產品先以實際片數計算：N = 範圍內唯一投入 PPID，B = 同範圍任一紀錄不良的唯一 PPID，G = N − B，製程良率 Y = G ÷ N；日期階段主要值另採各有效製程良率平均。FAIL／Scrap 或有不良項目的 GOOD 均計不良。');
   host.append(table(['層級','運算公式','回算方式'],[
-   ['日期階段（日期柱）','N(日) = |各製程投入PPID聯集|；B(日) = |各製程不良PPID聯集|；Y(日) = (N(日) − B(日)) ÷ N(日)','子層投入合計 − 重複計入 = N(日)；不良合計 − 重複不良 = B(日)。'],
-   ['製程柱','Y(s) = (N(s) − B(s)) ÷ N(s)','同片跨製程仍在各製程各計一次，回到日期時以聯集去重，不相加百分比。'],
+   ['日期階段（主要日期柱）','Y平均(日) = AGGREGATE(1,6,該階段有資料製程的良率)','先合併各產品片數計算製程良率，再平均製程；空白略過、0%納入。唯一投入仍為製程PPID聯集。'],
+   ['製程柱','Y(s) = (N(s) − B(s)) ÷ N(s)','同片在各製程各計一次；主要日期良率平均製程比例，投入及唯一PPID比較值另以聯集去重。'],
    ['產品於本製程','Y(p,s) = G(p,s) ÷ N(p,s)','產品身份互斥，Σ產品投入 = 製程投入；Σ產品良品 ÷ Σ產品投入 = 製程良率。'],
    ['不良項目','R(d) = B(d) ÷ 上層產品／製程投入 N','各項共用同一母數；良品 + 各項不良 = N，1 − ΣR(d) = 上層良率。'],
-   ['產品於當日階段','Y(p) = 產品跨製程唯一良品 ÷ 產品跨製程唯一投入','投入權重 = N(p) ÷ N(日)；Σ[Y(p) × 投入權重] = Y(日)。'],
+   ['產品於當日階段','Y(p) = 產品跨製程唯一良品 ÷ 產品跨製程唯一投入','投入權重 = N(p) ÷ N(日)；Σ[Y(p) × 投入權重] = 日期唯一PPID比較良率；不是主要製程平均良率。'],
   ]));
   const c=view.comparison;host.append(table(['同一天的口徑比較','實際結果','用途'],[
-   ['採用：唯一 PPID 良率',ratio(parent.good,parent.input),'日期、期間與產品總良率皆採各自範圍的唯一良品／唯一投入。'],
-   ['百分比直接 AGGREGATE(1,6,…) 平均',pct(c.directProcessMean),'僅作差異比較。每組一票，不能保證對應唯一片數，因此不採用。'],
+   ['採用：AGGREGATE(1,6,…) 製程平均良率',pct(c.directProcessMean),'對下方有資料製程柱取算術平均。沒有再平均產品。'],
+   ['比較：唯一 PPID 良率',ratio(parent.good,parent.input),'1－同階段唯一不良／同階段唯一投入。只取同一天、同階段三個指定製程。'],
+   ['兩算法差異（百分點）',c.difference==null?'—':(c.difference*100).toFixed(4),'製程平均良率－唯一PPID良率，乘100；不是相對百分比。'],
    ['重複過站投入加權比例',ratio(c.processGood,c.processInput),'僅作差異比較。跨製程同片重複，母數不等於唯一投入，因此不採用。'],
   ]));
-  text(host,'產品按實際唯一投入加權；少量低良率產品只影響其實際片數。下表產品身份互斥，投入、良品、不良及貢獻可直接相加。');
-  host.append(table(['產品','跨製程唯一投入','唯一良品','唯一不良','產品良率','投入權重','對日期良率貢獻','對日期不良率貢獻'],view.productSummaries.map(row=>[row.label,row.input,row.good,row.count,pct(row.value),pct(row.weight),pct(row.contribution),pct(row.badContribution)])));
+  text(host,'下表只分解「唯一PPID比較良率」：產品身份互斥，投入、良品、不良與比較貢獻可相加。主要日期柱平均的是製程良率，不再平均產品百分比。');
+  host.append(table(['產品','跨製程唯一投入','唯一良品','唯一不良','產品良率','投入權重','對日期唯一PPID良率貢獻（比較）','對日期唯一PPID不良率貢獻（比較）'],view.productSummaries.map(row=>[row.label,row.input,row.good,row.count,pct(row.value),pct(row.weight),pct(row.contribution),pct(row.badContribution)])));
  }else if(dimension==='product'){
   text(host,'本層產品柱表示「良率」。同一範圍的不良率 = 不良 PPID ÷ 投入 PPID = 1 − 良率。');
   host.append(table(['層級','公式與實際結果','比較'],[
@@ -45,7 +46,7 @@ export function contributionFormulaDetails(analysis,view,scope){
  const details=document.createElement('details');details.className='formula-notes contribution-formulas';details.dataset.dimension=view.dimension;const summary=document.createElement('summary');summary.textContent='本層公式、投入去重與口徑比較';details.append(summary);
  let loaded=false;details.addEventListener('toggle',()=>{
   if(!details.open||loaded)return;loaded=true;
-  text(details,`目前橫軸：${dimensionNames[view.dimension]}。全檔唯一投入 N全檔 = ${analysis.total}；此分母在下鑽時固定。正面／背面 AOI 紀錄不計。`);
+  text(details,`目前橫軸：${dimensionNames[view.dimension]}。全檔唯一投入 N全檔 = ${analysis.total}；此分母在下鑽時固定。只計前段（DAF熱壓投入、DAF外觀、功能一測試）與後段（輝度機測試、功能二測試、外觀檢查點亮測試）；其他製程紀錄不計。`);
   details.append(table(['數字','公式','與其他數字的差異'],[
    ['本層長條高度（全檔不良率貢獻）','C(g) = 首次歸屬此群的不良 PPID B(g) ÷ N全檔','日期、製程、不良項目、產品各層皆用全檔母數。'],
    ['長條旁投入','N(g) = 符合日期／製程／產品／工單範圍的 PPID 聯集大小','包含良品與不良品；不按不良項目縮小母數。'],

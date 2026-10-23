@@ -9,14 +9,14 @@ function auditPanel(view){
  const {parent,audit,dimension}=view,host=document.createElement('div');host.className='stage-reconcile';host.dataset.pass=String(audit.inputOK&&audit.yieldOK&&audit.reportOK);
  const quantity=document.createElement('p'),yieldLine=document.createElement('p');quantity.className='stage-input-audit';yieldLine.className='stage-yield-audit';
  quantity.textContent=dimension==='defect'?`投入驗算：良品 ${parent.good} ＋ 不良項目唯一 PPID ${audit.uniqueInput} ＝ 上層唯一投入 ${parent.input}`:`投入驗算：子層投入合計 ${audit.sumInput} − 重複計入 ${audit.overlap} ＝ 上層唯一投入 ${parent.input}`;
- const method=dimension==='process'?'聯集唯一良品 ÷ 聯集唯一投入':dimension==='product'?'Σ（產品良品數 ÷ 本製程唯一投入）':'1 − 各不良項目不良率合計';
+ const method=dimension==='process'?'AGGREGATE(1,6,有資料製程良率)':dimension==='product'?'Σ（產品良品數 ÷ 本製程唯一投入）':'1 − 各不良項目不良率合計';
  yieldLine.textContent=`良率驗算：${method} ${pct(audit.reconstructed)} ＝ 上層良率 ${pct(parent.value)}${host.dataset.pass==='true'?' · 通過':' · 尚未吻合'}`;
  const bad=document.createElement('p');bad.textContent=`不良驗算：子層不良合計 ${audit.count} − 重複計入 ${audit.badOverlap} ＝ 上層唯一不良 ${parent.count}`;
  host.append(quantity,bad,yieldLine);
  const details=document.createElement('details');details.className='stage-audit-details';const summary=document.createElement('summary');summary.textContent='展開本層公式與良率回算明細';details.append(summary,stageFormulaContent(view));
  if(dimension==='process'){
   const info=document.createElement('p');info.textContent='製程本身的投入可能重疊；以下另將每片歸屬一次，僅供互斥加總驗算。先取不良紀錄，FAIL優先，再依資料順序；這不改變各製程實際投入與良率，也不改全檔首次不良歸屬。';details.append(info);
-  details.append(table(['製程','自身唯一投入','自身唯一不良','歸屬投入（互斥）','歸屬良品','歸屬不良','對日期良率貢獻'],view.groups.map(row=>[row.label,row.input,row.count,row.allocatedInput,row.allocatedGood,row.allocatedBad,pct(row.contribution)])));
+  details.append(table(['製程','自身唯一投入','自身唯一不良','歸屬投入（互斥驗算）','歸屬良品','歸屬不良','對日期平均良率貢獻'],view.groups.map(row=>[row.label,row.input,row.count,row.allocatedInput,row.allocatedGood,row.allocatedBad,pct(row.contribution)])));
  }else{
   if(dimension==='defect'){const info=document.createElement('p');info.textContent='依當日、當製程、當產品的唯一 PPID 分解不良，FAIL／Scrap 優先；每片只列一項。各項共用上層投入母數，不將母數重複相加；良品數加各項唯一不良片數等於投入。此處對應每日製程良率，完整不良分析另沿用全檔首次不良歸屬。';details.append(info);}
   details.append(table(['項目',dimension==='defect'?'共同基準投入':'唯一投入','良品',dimension==='defect'?'項目唯一 PPID':'不良',dimension==='defect'?'不良項目不良率':'良率',dimension==='defect'?'良率扣除值':'對上層良率貢獻'],view.groups.map(row=>[row.label,row.input,row.good,row.count,pct(row.value),pct(row.contribution)])));

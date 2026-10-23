@@ -60,9 +60,9 @@ test('order filters and yield use first-NG attribution without counting cross-or
  const report=ctx.XLSX.utils.book_new();ctx.appendQualitySheets(ctx.XLSX,report,analysis);assert.ok(report.Sheets['工單良率']);assert.equal(report.Sheets['工單良率'].A1.v,'工單');
 });
 
-test('work-order stage yields use eligible process PPID unions instead of percentage averages',()=>{
+test('work-order stage yields average eligible process percentages and retain unique PPID input',()=>{
  const product=JSON.stringify(['IC','Model']),observations=[];for(const [process,items] of [['DAF外觀',[['a',true],['b',false]]],['DAF熱壓投入',[['c',false],['d',false],['e',false]]],['功能一測試',[['f',true]]]])for(const [serial,fail] of items)observations.push({product,date:'2026-10-05',order:'O1',process,serial,fail});
- const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,4/6);assert.equal(rows[0].input,6);assert.equal(rows[1].value,null);
+ const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,.5);assert.equal(rows[0].input,6);assert.equal(rows[1].value,null);
 });
 
 test('multi-selected trend items retain exposure and blank dates; disabled items are excluded from exported totals',()=>{

@@ -21,7 +21,7 @@ function buildYieldReport(merger,identities){
   counts.set(key,count);
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
- const stageChecks=[],stageDetails=[['日期','IC','機種','階段','唯一良品PPID','唯一不良PPID','唯一投入PPID','良率','不良率']];
+ const stageComparisons=[['日期','IC','機種','階段','採用：AGGREGATE製程平均良率','唯一PPID良率（比較）','良率差異（平均減唯一，百分點）','唯一投入PPID','唯一不良PPID','唯一PPID不良率','有資料製程數']],stageChecks=[],stageDetails=[['日期','IC','機種','階段','唯一良品PPID','唯一不良PPID','唯一投入PPID','良率','不良率']];
  const merged=merger.finish({dense:true}),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
@@ -36,7 +36,7 @@ function buildYieldReport(merger,identities){
  const productList=[...products.entries()].sort((a,b)=>a[1].model.localeCompare(b[1].model)||a[1].ic.localeCompare(b[1].ic));
  if(productList.length*(order.length+4)>1048576)throw Error('產品與製程超過 Excel 列數上限。');
  for(const [product,{ic,model}] of productList){
-  processRows.push([model]);processRows.push([ic,...dates]);
+  processRows.push([model]);processRows.push([ic,...dates]);const start=processRows.length+1;
   for(const process of order){
    const r=processRows.length+1;processRows.push([process]);
    for(let c=0;c<dates.length;c++){
@@ -49,15 +49,20 @@ function buildYieldReport(merger,identities){
   for(const [stage,offset,length] of [['SMT',6,0],['前段',0,3],['後段',3,3]]){
    const r=stageRows.length+1;stageRows.push([stage]);
    for(let c=0;c<dates.length;c++){
-    const selected=order.slice(offset,offset+length),units=new Map();
-    for(const process of selected){const cell=counts.get(JSON.stringify([product,dates[c],process]));if(cell)for(const [serial,fail] of cell.units)units.set(serial,Boolean(units.get(serial)||fail));}
+    const selected=order.slice(offset,offset+length),units=new Map(),processStats=[];
+    for(const process of selected){const cell=counts.get(JSON.stringify([product,dates[c],process]));if(cell){processStats.push({process,input:cell.units.size,good:cell.good,fail:cell.fail});for(const [serial,fail] of cell.units)units.set(serial,Boolean(units.get(serial)||fail));}}
     const input=units.size,fail=[...units.values()].filter(Boolean).length,good=input-fail;
-    let formula='""';
-    if(input){const index=stageDetails.length+1;stageDetails.push([dates[c],ic,model,stage,good,fail,input,good/input,fail/input]);formula=`IFERROR('階段計算明細'!E${index}/'階段計算明細'!G${index},"")`;stageChecks.push({product,ic,model,date:dates[c],stage,input,good,fail,yield:good/input,processes:selected});}
-    stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:input?'n':'s',v:input?good/input:'',f:formula,z:'0.00%'};
+    const average=processStats.length?processStats.reduce((sum,row)=>sum+row.good/row.input,0)/processStats.length:null;let formula='""';
+    if(input){stageDetails.push([dates[c],ic,model,stage,good,fail,input,good/input,fail/input]);const column=XLSX.utils.encode_col(c+1),from=start+offset,to=from+length-1;formula=`IFERROR(_xlfn.AGGREGATE(1,6,'每日製程良率'!${column}${from}:${column}${to}),"")`;stageChecks.push({product,ic,model,date:dates[c],stage,input,good,fail,yield:average,uniqueYield:good/input,difference:average-good/input,processes:selected,processStats});stageComparisons.push([dates[c],ic,model,stage,average,good/input,(average-good/input)*100,input,fail,fail/input,processStats.length]);}
+    stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:input?'n':'s',v:input?average:'',f:formula,z:'0.00%'};
    }
   }
   stageRows.push([]);
+ }
+ for(const date of dates)for(const [stage,selected] of [['前段',preferred.slice(0,3)],['後段',preferred.slice(3,6)]]){
+  const units=new Map(),processUnits=new Map();for(const cell of counts.values())if(cell.day===date&&selected.includes(cell.process)){const group=processUnits.get(cell.process)||new Map();for(const [serial,fail] of cell.units){units.set(serial,Boolean(units.get(serial)||fail));group.set(serial,Boolean(group.get(serial)||fail));}processUnits.set(cell.process,group);}
+  const input=units.size,fail=[...units.values()].filter(Boolean).length,values=[...processUnits.values()].map(items=>[...items.values()].filter(fail=>!fail).length/items.size),average=values.length?values.reduce((s,v)=>s+v,0)/values.length:null,unique=input?(input-fail)/input:null;
+  stageComparisons.push([date,'全部產品','全部機種',stage,average,unique,average==null?null:(average-unique)*100,input,fail,input?fail/input:null,values.length]);
  }
  const finish=(rows,cells)=>{if(!rows.length)rows=[['無納入分析的製程',...dates]];const sheet=XLSX.utils.aoa_to_sheet(rows);Object.assign(sheet,cells);sheet['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length-1,c:dates.length}});sheet['!cols']=[{wch:28},...dates.map(()=>({wch:16}))];return sheet;};
  const book=XLSX.utils.book_new();book.Custprops=merged.book.Custprops;
@@ -65,6 +70,7 @@ function buildYieldReport(merger,identities){
  XLSX.utils.book_append_sheet(book,finish(stageRows,stageSheet),'每日階段良率');
  const stageDetailSheet=XLSX.utils.aoa_to_sheet(stageDetails);
  for(let r=2;r<=stageDetails.length;r++){stageDetailSheet['H'+r]={t:'n',v:stageDetails[r-1][7],f:`E${r}/G${r}`,z:'0.00%'};stageDetailSheet['I'+r]={t:'n',v:stageDetails[r-1][8],f:`F${r}/G${r}`,z:'0.00%'};}
+ const comparisonSheet=XLSX.utils.aoa_to_sheet(stageComparisons);for(let r=2;r<=stageComparisons.length;r++){for(const col of ['E','F','J'])if(comparisonSheet[col+r])comparisonSheet[col+r].z='0.00%';comparisonSheet['G'+r]={t:stageComparisons[r-1][6]==null?'s':'n',v:stageComparisons[r-1][6]??'',f:`IF(OR(E${r}="",F${r}=""),"",(E${r}-F${r})*100)`,z:'0.0000'};}comparisonSheet['!cols']=stageComparisons[0].map(()=>({wch:25}));XLSX.utils.book_append_sheet(book,comparisonSheet,'階段良率比較');
  XLSX.utils.book_append_sheet(book,stageDetailSheet,'階段計算明細');
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
  XLSX.utils.book_append_sheet(book,merged.book.Sheets.Detail,'Detail');
