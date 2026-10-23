@@ -16,11 +16,11 @@ test('unique units and one primary process/defect reconcile every ranking to ove
  const defectSheet=book.Sheets['不良分析'];assert.equal(defectSheet.A1.v,'全產品總PPID');assert.equal(defectSheet.B1.v,a.total);assert.equal(defectSheet.H1.v,a.badRate);assert.equal(defectSheet.A4.v,'日期');assert.equal(defectSheet.A5.v,'2026-10-05');assert.equal(defectSheet.E5.v,'破損,或一致性差');assert.equal(defectSheet.F5.v,3);assert.equal(defectSheet.G5.v,2);assert.equal(defectSheet.H5.v,2/3);assert.equal(defectSheet.I5.v,.4);assert.equal(defectSheet.I7.v,a.badRate);assert.equal(defectSheet.I7.z,'0.00%');
  const loaded=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});assert.equal(loaded.Sheets['品質總覽'].B2.v,5);
 });
-test('product total yield averages populated date-stage yields while PPID metrics and daily calculations stay separate',()=>{
+test('product total yield remains unique good/input despite incompatible legacy stage percentage averages',()=>{
  const a=analyze([row('a','P1','FAIL','bad'),row('b','P1','GOOD',null)]),id=a.products[0].id;
- applyProductStageAverage(a,[{product:id,date:'2026-10-05',stage:'前段',yield:.8},{product:id,date:'2026-10-06',stage:'SMT',yield:1},{product:id,date:'2026-10-06',stage:'後段',yield:.7},{product:'other',date:'2026-10-05',stage:'SMT',yield:0}]);
- assert.equal(a.products[0].yield,(.8+1+.7)/3);assert.equal(a.products[0].stageAverageCount,3);assert.equal(a.products[0].badRate,.5);assert.equal(a.products[0].fail,1);
- const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);const sheet=book.Sheets['產品總良率'];assert.equal(sheet.F2.v,(.8+1+.7)/3);assert.equal(sheet.G2.v,.5);assert.equal(sheet.H2.v,3);assert.match(XLSX.utils.sheet_to_json(book.Sheets['統計說明'],{header:1}).find(r=>r[0]==='產品總良率')[1],/日期×階段良率取算術平均/);
+ const returned=applyProductStageAverage(a,[{product:id,date:'2026-10-05',stage:'前段',yield:.8},{product:id,date:'2026-10-06',stage:'SMT',yield:1},{product:id,date:'2026-10-06',stage:'後段',yield:.7},{product:'other',date:'2026-10-05',stage:'SMT',yield:0}]);
+ assert.equal(returned,a);assert.equal(a.products[0].yield,.5);assert.equal(a.products[0].yieldMethod,'unique-ppid');assert.equal(a.products[0].badRate,.5);assert.equal(a.products[0].fail,1);
+ const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,a);const sheet=book.Sheets['產品總良率'];assert.equal(sheet.F2.v,.5);assert.equal(sheet.G2.v,.5);assert.equal(sheet.H2.v,'唯一PPID良品／投入');assert.match(XLSX.utils.sheet_to_json(book.Sheets['統計說明'],{header:1}).find(r=>r[0]==='產品總良率')[1],/唯一良品PPID／唯一投入PPID/);
 });
 test('one PPID with contradictory products is counted once and explicitly pending',()=>{
  const a=analyze([row('same','P1','FAIL','對照測試'),row('same','P1','GOOD',null,6,'B')]);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.identityConflicts.length,1);assert.equal(a.products[0].pending,true);assert.equal(a.defects[0].defect,'對照測試');

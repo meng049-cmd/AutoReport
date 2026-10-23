@@ -21,7 +21,7 @@ function buildYieldReport(merger,identities){
   counts.set(key,count);
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
- const stageChecks=[];
+ const stageChecks=[],stageDetails=[['日期','IC','機種','階段','唯一良品PPID','唯一不良PPID','唯一投入PPID','良率','不良率']];
  const merged=merger.finish({dense:true}),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
@@ -36,7 +36,7 @@ function buildYieldReport(merger,identities){
  const productList=[...products.entries()].sort((a,b)=>a[1].model.localeCompare(b[1].model)||a[1].ic.localeCompare(b[1].ic));
  if(productList.length*(order.length+4)>1048576)throw Error('產品與製程超過 Excel 列數上限。');
  for(const [product,{ic,model}] of productList){
-  processRows.push([model]);processRows.push([ic,...dates]);const start=processRows.length+1;
+  processRows.push([model]);processRows.push([ic,...dates]);
   for(const process of order){
    const r=processRows.length+1;processRows.push([process]);
    for(let c=0;c<dates.length;c++){
@@ -49,11 +49,12 @@ function buildYieldReport(merger,identities){
   for(const [stage,offset,length] of [['SMT',6,0],['前段',0,3],['後段',3,3]]){
    const r=stageRows.length+1;stageRows.push([stage]);
    for(let c=0;c<dates.length;c++){
-    const column=XLSX.utils.encode_col(c+1),from=start+offset,to=from+length-1;
-    const values=order.slice(offset,offset+length).map(process=>counts.get(JSON.stringify([product,dates[c],process]))).filter(Boolean).map(v=>v.good/(v.good+v.fail));
-    const formula=stage==='SMT'?'""':`IFERROR(_xlfn.AGGREGATE(1,6,'每日製程良率'!${column}${from}:${column}${to}),"")`;
-    if(values.length)stageChecks.push({product,ic,model,date:dates[c],stage,yield:values.reduce((a,b)=>a+b,0)/values.length,processes:order.slice(offset,offset+length)});
-    stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:values.length?'n':'s',v:values.length?values.reduce((a,b)=>a+b,0)/values.length:'',f:formula,z:'0.00%'};
+    const selected=order.slice(offset,offset+length),units=new Map();
+    for(const process of selected){const cell=counts.get(JSON.stringify([product,dates[c],process]));if(cell)for(const [serial,fail] of cell.units)units.set(serial,Boolean(units.get(serial)||fail));}
+    const input=units.size,fail=[...units.values()].filter(Boolean).length,good=input-fail;
+    let formula='""';
+    if(input){const index=stageDetails.length+1;stageDetails.push([dates[c],ic,model,stage,good,fail,input,good/input,fail/input]);formula=`IFERROR('階段計算明細'!E${index}/'階段計算明細'!G${index},"")`;stageChecks.push({product,ic,model,date:dates[c],stage,input,good,fail,yield:good/input,processes:selected});}
+    stageSheet[XLSX.utils.encode_cell({r:r-1,c:c+1})]={t:input?'n':'s',v:input?good/input:'',f:formula,z:'0.00%'};
    }
   }
   stageRows.push([]);
@@ -62,6 +63,9 @@ function buildYieldReport(merger,identities){
  const book=XLSX.utils.book_new();book.Custprops=merged.book.Custprops;
  XLSX.utils.book_append_sheet(book,finish(processRows,processSheet),'每日製程良率');
  XLSX.utils.book_append_sheet(book,finish(stageRows,stageSheet),'每日階段良率');
+ const stageDetailSheet=XLSX.utils.aoa_to_sheet(stageDetails);
+ for(let r=2;r<=stageDetails.length;r++){stageDetailSheet['H'+r]={t:'n',v:stageDetails[r-1][7],f:`E${r}/G${r}`,z:'0.00%'};stageDetailSheet['I'+r]={t:'n',v:stageDetails[r-1][8],f:`F${r}/G${r}`,z:'0.00%'};}
+ XLSX.utils.book_append_sheet(book,stageDetailSheet,'階段計算明細');
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
  XLSX.utils.book_append_sheet(book,merged.book.Sheets.Detail,'Detail');
  if(pendingRows.length){const pending=XLSX.utils.aoa_to_sheet([merger.header,...pendingRows]);for(let r=2;r<=pendingRows.length+1;r++)if(pending['F'+r])pending['F'+r].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,pending,'待補產品資料');}

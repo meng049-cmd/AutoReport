@@ -31,6 +31,14 @@ export function cohortInput(analysis,filters={}){
  else {count=0;const totals=filters.process?analysis.dailyProcessTotals:analysis.dailyProductTotals;for(const [key,total] of totals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))count+=total;}}
  return count||0;
 }
+const dateAuditCaches=new WeakMap();
+export function dateInputAudits(analysis,filters={}){
+ let cache=dateAuditCaches.get(analysis);if(!cache){cache=new Map();dateAuditCaches.set(analysis,cache);}
+ const key=JSON.stringify([filters.startDate,filters.endDate,filters.granularity||'day',filters.product||'',filters.order||'',filters.process||'']);if(cache.has(key))return cache.get(key);
+ const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),sets=new Map(buckets.map(bucket=>[bucket.key,{units:new Set(),processes:new Map()}]));
+ for(const row of filteredObservations(analysis,{...filters,date:'',defect:''})){const group=sets.get(periodKey(row.date,filters.granularity));if(!group)continue;group.units.add(row.serial);let process=group.processes.get(row.process);if(!process){process=new Set();group.processes.set(row.process,process);}process.add(row.serial);}
+ const result=buckets.map(bucket=>{const group=sets.get(bucket.key),uniqueInput=group.units.size,processInputSum=[...group.processes.values()].reduce((sum,units)=>sum+units.size,0),input=cohortInput(analysis,{...filters,date:bucket.key});return {...bucket,uniqueInput,processInputSum,repeatedInput:processInputSum-uniqueInput,input,consistent:input===uniqueInput};});cache.set(key,result);return result;
+}
 export function defectBreakdown(analysis,filters={},dates=[],order=dimensions){
  const records=attributedRows(analysis,filters),dimension=order.find(key=>!filters[key])||null,groupMap=new Map();
  const ensure=(key,label)=>{if(!groupMap.has(key))groupMap.set(key,{key,label,count:0});return groupMap.get(key);};
@@ -75,9 +83,7 @@ export function selectTrendSeries(trend,names){
  return {...trend,dates,series};
 }
 export function orderStageSeries(analysis,stage,filters={},dates=[]){
- const processes=stage==='前段'?['DAF外觀','DAF熱壓投入','功能一測試']:['功能二測試','外觀檢查點亮測試','輝度機測試'],groups=new Map();
- for(const row of filteredObservations(analysis,{...filters,date:'',process:'',defect:''})){if(!processes.includes(row.process))continue;const key=JSON.stringify([row.date,row.product,row.process]),g=groups.get(key)||{date:row.date,product:row.product,units:new Map()};g.units.set(row.serial,Boolean(g.units.get(row.serial)||row.fail));groups.set(key,g);}
- const products=new Map();for(const g of groups.values()){const key=JSON.stringify([g.date,g.product]),values=products.get(key)||[];values.push([...g.units.values()].filter(fail=>!fail).length/g.units.size);products.set(key,values);}
- const days=new Map();for(const [key,values] of products){const [date]=JSON.parse(key),items=days.get(date)||[];items.push(values.reduce((sum,v)=>sum+v,0)/values.length);days.set(date,items);}
- return dates.map(date=>{const values=days.get(date)||[];return {date,value:values.length?values.reduce((sum,v)=>sum+v,0)/values.length:null};});
+ const processes=stage==='前段'?['DAF外觀','DAF熱壓投入','功能一測試']:['功能二測試','外觀檢查點亮測試','輝度機測試'],days=new Map();
+ for(const row of filteredObservations(analysis,{...filters,date:'',process:'',defect:''})){if(row.attributionOnly||!processes.includes(row.process))continue;const units=days.get(row.date)||new Map();units.set(row.serial,Boolean(units.get(row.serial)||row.fail));days.set(row.date,units);}
+ return dates.map(date=>{const units=days.get(date)||new Map(),input=units.size,count=[...units.values()].filter(Boolean).length;return {date,input,count,value:input?(input-count)/input:null};});
 }

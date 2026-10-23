@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
+import {dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
@@ -9,6 +9,7 @@ test('trend exposure unions PPIDs across eligible processes and period dates, ex
  assert.equal(analysis.total,2);assert.equal(analysis.fail,1);assert.equal(analysis.attribution[0].defect,'eligible defect');assert.ok(analysis.observations.every(row=>!row.process.includes('AOI')));
  const daily=defectTrend(analysis,scope);assert.deepEqual(daily.dates.map(d=>d.input),[2,1,0]);assert.deepEqual(daily.dates.map(d=>d.rate),[.5,0,null]);
  const front=defectTrend(analysis,{...scope,process:'DAF外觀'}),test=defectTrend(analysis,{...scope,process:'功能一測試'});assert.equal(front.dates[0].input,2);assert.equal(test.dates[0].input,1);assert.equal(daily.dates[0].input,2,'combined input is a union, not 2 + 1');
+ for(const granularity of ['day','week','month']){const audit=dateInputAudits(analysis,{...scope,granularity});assert.ok(audit.every(row=>row.consistent));assert.equal(audit[0].uniqueInput,2);assert.equal(audit[0].processInputSum,3);assert.equal(audit[0].repeatedInput,1);}
  for(const granularity of ['week','month']){const period=defectTrend(analysis,{...scope,granularity});assert.equal(period.dates[0].input,2);assert.equal(period.dates[0].count,1);assert.equal(period.dates[0].rate,.5);}
  assert.equal(defectTrend(analysis,{...scope,process:'正面AOI'}).dates[0].input,0);
 });
@@ -59,9 +60,9 @@ test('order filters and yield use first-NG attribution without counting cross-or
  const report=ctx.XLSX.utils.book_new();ctx.appendQualitySheets(ctx.XLSX,report,analysis);assert.ok(report.Sheets['工單良率']);assert.equal(report.Sheets['工單良率'].A1.v,'工單');
 });
 
-test('work-order stage yields preserve the arithmetic mean of populated process yields',()=>{
+test('work-order stage yields use eligible process PPID unions instead of percentage averages',()=>{
  const product=JSON.stringify(['IC','Model']),observations=[];for(const [process,items] of [['DAF外觀',[['a',true],['b',false]]],['DAF熱壓投入',[['c',false],['d',false],['e',false]]],['功能一測試',[['f',true]]]])for(const [serial,fail] of items)observations.push({product,date:'2026-10-05',order:'O1',process,serial,fail});
- const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,.5);assert.equal(rows[1].value,null);
+ const rows=orderStageSeries({observations},'前段',{order:'O1',product},['2026-10-05','2026-10-06']);assert.equal(rows[0].value,4/6);assert.equal(rows[0].input,6);assert.equal(rows[1].value,null);
 });
 
 test('multi-selected trend items retain exposure and blank dates; disabled items are excluded from exported totals',()=>{
