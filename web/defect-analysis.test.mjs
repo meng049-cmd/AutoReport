@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
+import {scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
@@ -102,4 +102,14 @@ test('exported complete hierarchies carry process ownership before the process l
  const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'};
  for(const first of ['defect','product','date']){const order=defectDimensions(first),levels=allDefectLevels(analysis,scope,order);for(const row of levels)if(row.defect)assert.equal(row.input,cohortInput(analysis,{...scope,...row,process:row.process||row.defectProcess}));const leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),2);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);}
  const roots=allDefectLevels(analysis,scope,defectDimensions('defect')).filter(row=>row.level==='defect');assert.deepEqual(roots.map(row=>[row.defectProcess,row.input]).sort(),[['P1',2],['P2',5]]);
+});
+
+test('top quality summary recalculates date-range PPID unions and scoped failures instead of fixed whole-file totals',()=>{
+ const row=(serial,date,process,fail,product='A',order='O1')=>({serial,date,process,fail,product,order}),analysis={observations:[row('a','2026-06-02','P1',true),row('a','2026-06-03','P2',false,'A','O2'),row('b','2026-06-03','P1',false),row('c','2026-06-03','P2',true),row('c','2026-06-03','P1',true),row('d','2026-06-04','P2',false,'B')]};
+ assert.deepEqual(scopedQualitySummary(analysis),{total:4,fail:2,good:2,yield:.5,badRate:.5});
+ const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.deepEqual(scopedQualitySummary(analysis,scope),{total:3,fail:1,good:2,yield:2/3,badRate:1/3});assert.equal(scopedQualitySummary(analysis,{...scope,process:'P1'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,order:'O1'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,defect:'ignored'}).total,3);
+ assert.deepEqual(scopedQualitySummary(analysis,{startDate:'2026-06-04',endDate:'2026-06-04',product:'B'}),{total:1,fail:0,good:1,yield:1,badRate:0});assert.deepEqual(scopedQualitySummary(analysis,{startDate:'2026-06-05',endDate:'2026-06-05'}),{total:0,fail:0,good:0,yield:null,badRate:null});assert.equal(scopedQualitySummary(analysis,{startDate:'2026-06-02',endDate:'2026-06-04'}).total,4);
+});
+test('a repeated FAIL inside a selected interval still lowers its quality yield even when globally attributed earlier',()=>{
+ const analysis={observations:[{serial:'a',date:'2026-06-02',process:'P1',fail:true},{serial:'a',date:'2026-06-03',process:'P2',fail:true},{serial:'b',date:'2026-06-03',process:'P2',fail:false}],attribution:[{serial:'a',date:'2026-06-02',process:'P1'}]};const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.equal(attributedRows(analysis,scope).length,0);assert.deepEqual(scopedQualitySummary(analysis,scope),{total:2,fail:1,good:1,yield:.5,badRate:.5});
 });

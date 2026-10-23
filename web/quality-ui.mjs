@@ -5,7 +5,7 @@ import {createStageChartWorkbook} from './chart-export.mjs';
 import {buildStageAnalysis,stageAuditSheets} from './stage-analysis.mjs';
 import {renderStageDrillContent} from './stage-drill-ui.mjs';
 import {contributionFormulaDetails} from './chart-formulas.mjs';
-import {defectOptions,defectFilterLabel,stageComparisonSheet,calendarDates,calendarBuckets,periodKey,periodBounds,periodLabel,dimensions,dimensionNames,defectDimensions,cohortInput,attributedRows,defectBreakdown,allDefectLevels,workOrderRows,orderYieldRows,orderName,filteredObservations} from './defect-analysis.mjs';
+import {scopedQualitySummary,defectOptions,defectFilterLabel,stageComparisonSheet,calendarDates,calendarBuckets,periodKey,periodBounds,periodLabel,dimensions,dimensionNames,defectDimensions,cohortInput,attributedRows,defectBreakdown,allDefectLevels,workOrderRows,orderYieldRows,orderName,filteredObservations} from './defect-analysis.mjs';
 const $=id=>document.getElementById(id),pct=x=>Number.isFinite(x)?(x*100).toFixed(2)+'%':'—';
 let analysis,stageChecks=[],periodStart='',periodEnd='',filters={},detailRows=[],detailPage=0,detailMode='ppid',firstAxis='date',stageModels=new Map(),stageExports=new Map(),stageDrillPaths=new Map(),stageDrillLeaves=new Map();
 let renderedWidth=null,layoutFrame=0;
@@ -93,9 +93,8 @@ function renderDefects(){
  $('defectOpen').disabled=!view.count;$('defectOrders').disabled=!view.count;$('defectEmpty').hidden=Boolean(view.input||view.count);
 }
 function render(){
- if(!analysis)return;const product=analysis.products.find(p=>p.id===filters.product),total=product?.total??analysis.total,bad=product?.fail??analysis.fail;
- const workOrders=filters.order?orderYieldRows(analysis,{...baseFilters(),product:filters.product,order:filters.order}):null,scopedTotal=workOrders?workOrders.reduce((sum,row)=>sum+row.total,0):total,scopedBad=workOrders?workOrders.reduce((sum,row)=>sum+row.fail,0):bad;
- metrics('qualityMetrics',[[filters.order?'工單投入 PPID':'全檔投入 PPID',scopedTotal.toLocaleString()],[filters.order?'工單唯一 PPID 良率':product?'產品總良率（唯一PPID）':'唯一 PPID 總良率',pct(filters.order?(scopedTotal?(scopedTotal-scopedBad)/scopedTotal:null):product?product.yield:analysis.yield)],['不良 PPID',scopedBad.toLocaleString()],['唯一 PPID 不良率',pct(scopedTotal?scopedBad/scopedTotal:null)]]);
+ if(!analysis)return;const summary=scopedQualitySummary(analysis,{...baseFilters(),product:filters.product,order:filters.order,process:filters.process});
+ metrics('qualityMetrics',[['區間投入 PPID',summary.total.toLocaleString()],['區間唯一 PPID 良率',pct(summary.yield)],['區間不良 PPID',summary.fail.toLocaleString()],['區間唯一 PPID 不良率',pct(summary.badRate)]]);
  $('qualitySkipped').hidden=!analysis.skippedRows?.length;$('qualitySkipped').textContent=analysis.skippedRows?.length?'測試模式結果：已略過 '+analysis.skippedRows.length+' 列錯誤資料，詳見下載報表「略過錯誤明細」。':'';
  $('qualityPeriod').textContent=filters.startDate+' — '+filters.endDate;renderDefects();renderQualityExtras(analysis,filters,order=>setFilter('order',order));for(const stage of stages){drawStageChart(stage);if(!stageExports.has(stage.key)){const initialRows=daily(stage.key,''),initialInputs=stageInputCounts(stage.key,initialRows,{});stageExports.set(stage.key,{rows:initialRows,inputs:initialInputs,snapshot:$('stage-'+stage.key).toDataURL('image/png'),width:$('stage-'+stage.key).width/(window.devicePixelRatio||1)});}$('summary-'+stage.key).textContent='期間製程平均 '+pct(stageModel(stage.key).period.value)+' · 唯一PPID '+pct(stageModel(stage.key).period.uniqueYield)+' · 目標 '+pct(stage.target)+' · 期間唯一投入 '+stageModel(stage.key).period.input;renderStageDrill(stage);}
  renderedWidth=$('qualityDashboard').clientWidth;

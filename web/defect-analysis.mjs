@@ -34,6 +34,12 @@ export const orderName=value=>String(value??'').trim()||'【未填工單】';
 function matches(row,filters,ignoreDefect=false){return !filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
 export function attributedRows(analysis,filters={}){const scope=processScope(filters);return analysis.attribution.filter(row=>matches(row,scope));}
 export function filteredObservations(analysis,filters={}){const scope=processScope(filters);return (analysis.observations||[]).filter(row=>matches(row,scope,true));}
+/** Current-period quality uses actual scoped observations, with each PPID counted once. */
+export function scopedQualitySummary(analysis,filters={}){
+ const units=new Map();for(const row of filteredObservations(analysis,{...filters,defect:''}))units.set(row.serial,Boolean(units.get(row.serial)||row.fail));
+ const total=units.size,fail=[...units.values()].filter(Boolean).length,good=total-fail;
+ return {total,fail,good,yield:total?good/total:null,badRate:total?fail/total:null};
+}
 const cohortCaches=new WeakMap();
 export function cohortInput(analysis,filters={}){
  filters=processScope(filters);if(filters.invalidProcess)return 0;
