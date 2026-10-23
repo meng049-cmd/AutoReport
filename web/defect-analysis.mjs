@@ -1,6 +1,6 @@
 export const dimensions=['product','date','process','defect'];
 export const dimensionNames={product:'產品',date:'日期',process:'製程',defect:'不良項目'};
-export function defectDimensions(first='product'){return ['product','defect','date'].includes(first)?[first,...dimensions.filter(key=>key!==first)]:[...dimensions];}
+export function defectDimensions(first='product'){if(first==='date')return ['date','process','defect','product'];return ['product','defect'].includes(first)?[first,...dimensions.filter(key=>key!==first)]:[...dimensions];}
 const dayMs=86400000, iso=time=>new Date(time).toISOString().slice(0,10);
 export function calendarDates(start,end){const dates=[];for(let time=Date.parse(start+'T00:00:00Z'),last=Date.parse(end+'T00:00:00Z');Number.isFinite(time)&&time<=last;time+=dayMs)dates.push(iso(time));return dates;}
 export function periodKey(date,mode='day'){

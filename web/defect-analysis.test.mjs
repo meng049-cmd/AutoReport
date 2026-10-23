@@ -71,6 +71,7 @@ test('multi-selected trend items retain exposure and blank dates; disabled items
 });
 
 test('product, defect and date first axes reconcile every drilldown and keep empty dates',()=>{
+ assert.deepEqual(defectDimensions('date'),['date','process','defect','product']);
  const analysis=fixture(),scope={startDate:'2026-10-05',endDate:'2026-10-08',granularity:'day'};
  for(const first of ['product','defect','date']){const order=defectDimensions(first);assert.equal(order[0],first);assert.equal(new Set(order).size,4);const visit=(filters,depth)=>{const view=defectBreakdown(analysis,filters,[],order);assert.equal(view.dimension,order[depth]||null);if(!view.dimension)return;assert.equal(view.groups.reduce((sum,g)=>sum+g.count,0),view.count);assert.ok(Math.abs(view.groups.reduce((sum,g)=>sum+g.contribution,0)-view.contribution)<1e-12);for(const group of view.groups)if(group.count)visit({...filters,[view.dimension]:group.key},depth+1);};visit(scope,0);
  const levels=allDefectLevels(analysis,scope,order),roots=levels.filter(row=>row.level===first),leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(roots.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),analysis.fail);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);if(first!=='product')assert.ok(roots.every(row=>row.ic==='全部產品'&&row.model==='全部機種'));
