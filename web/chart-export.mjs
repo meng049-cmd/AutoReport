@@ -40,9 +40,9 @@ export async function createStageChartWorkbook(stage,rows,options={}){
  const sheetName=stage.sheetName||'每日階段良率';
  const sheet=book.addWorksheet(sheetName,{views:[{state:'frozen',ySplit:1}]});
  if(options.trend){sheet.columns=[{header:'日期區間',key:'date',width:28},...options.trend.series.map((series,index)=>({header:series.defect,key:'series'+index,width:24}))];for(let i=0;i<rows.length;i++)sheet.addRow([rows[i].date,...options.trend.series.map(series=>series.points[i]?.rate??null)]);}
- else{sheet.columns=[{header:stage.categoryLabel||'日期',key:'date',width:28},{header:stage.valueLabel||`${stage.title}良率`,key:'actual',width:22},{header:stage.referenceLabel||'Target',key:'target',width:18}];
- for(const row of rows)sheet.addRow({date:row.date,actual:row.value,target:stage.target});}
- sheet.autoFilter={from:'A1',to:`${columnName(options.trend?options.trend.series.length+1:3)}${rows.length+1}`};
+ else{sheet.columns=[{header:stage.categoryLabel||'日期',key:'date',width:28},{header:stage.valueLabel||`${stage.title}良率`,key:'actual',width:22},{header:stage.referenceLabel||'Target',key:'target',width:18},...(options.inputCounts?[{header:'投入唯一PPID',key:'input',width:18}]:[])];
+ for(const [index,row] of rows.entries())sheet.addRow({date:row.date,actual:row.value,target:stage.target,input:options.inputCounts?.[index]});}
+ sheet.autoFilter={from:'A1',to:`${columnName(options.trend?options.trend.series.length+1:options.inputCounts?4:3)}${rows.length+1}`};
  sheet.getRow(1).height=25;sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF173B57'}};
  for(let r=2;r<=rows.length+1;r++){for(const col of options.trend?options.trend.series.map((_,i)=>i+2):[2,3])sheet.getCell(r,col).numFmt='0.00%';sheet.getRow(r).height=21;if(r%2===0)sheet.getRow(r).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF3F7FA'}};}
  const addTable=({name,rows,percentColumns=[]})=>{const page=book.addWorksheet(name);page.addRows(rows);page.views=[{state:'frozen',ySplit:1}];page.columns=Array.from({length:rows.reduce((max,row)=>Math.max(max,row.length),1)},()=>({width:26}));page.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};page.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF173B57'}};for(let r=2;r<=rows.length;r++)for(const c of percentColumns)page.getCell(r,c+1).numFmt='0.00%';return page;};
