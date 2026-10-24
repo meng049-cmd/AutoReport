@@ -5,8 +5,10 @@ import {execFileSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const calculationHash=createHash('sha256');for(const file of ['vendor/xlsx.full.min.js','merge-core.js','yield-core.js','quality-core.js','yield-worker.js'])calculationHash.update(await readFile(file));const calculationVersion=calculationHash.digest('hex').slice(0,16);
+const anonymousCloudMode=process.env.AUTOREPORT_ANONYMOUS_CLOUD==='1';
 const hash=createHash('sha256');
 for(const file of ['web/stage-metrics.mjs','web/chart-formulas.mjs','web/stage-drill-ui.mjs','web/stage-analysis.mjs','web/analysis-cache.mjs','web/quality-extras.mjs','web/navigation.mjs','vendor/package.json','vendor/xlsx.full.min.js','web/file-library.mjs','web/file-library-ui.mjs','web/limits.mjs','web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','threshold-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/chart-export.mjs','web/defect-analysis.mjs','web/report-context.mjs','web/threshold-ui.mjs','web/index.html','browser-storage.js','browser-db-worker.js','autoreport.py','web/update_database.py','cloud/cloud-sync.mjs','cloud/cloud-config.js','cloud/cloud-sync.css'])hash.update(await readFile(file));
+hash.update(anonymousCloudMode?'anonymous-cloud':'email-cloud');
 const buildId=hash.digest('hex').slice(0,12);
 await rm('dist',{recursive:true,force:true});await mkdir('dist/assets',{recursive:true});
 execFileSync(existsSync('.venv/bin/python')?'.venv/bin/python':'python',['web/export_reference.py','dist/reference.json']);
@@ -30,4 +32,4 @@ for (const name of ['cloud-sync.mjs','cloud-sync.css','cloud-config.js']) await 
 
 let sourceCommit=process.env.VERCEL_GIT_COMMIT_SHA||process.env.AUTOREPORT_SOURCE_COMMIT||null;
 if(!sourceCommit){try{sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{}}
-await writeFile('dist/release.json',JSON.stringify({buildId,sourceCommit,requireLoginForAnalysis:cloudConfig.requireLoginForAnalysis===true,supabaseHost:new URL(cloudConfig.url).hostname,builtAt:new Date().toISOString()},null,2));
+await writeFile('dist/release.json',JSON.stringify({buildId,sourceCommit,requireLoginForAnalysis:anonymousCloudMode?false:cloudConfig.requireLoginForAnalysis===true,anonymousCloudMode,supabaseHost:new URL(cloudConfig.url).hostname,builtAt:new Date().toISOString()},null,2));
