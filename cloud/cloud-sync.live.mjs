@@ -16,7 +16,7 @@ async function login(page,email,password){
  await page.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('雲端版本'),{},{timeout:30000});
 }
 async function remote(page,action,arg){return page.evaluate(async({action,arg,site})=>{
- const {CloudClient,capture,encode}=await import(new URL('cloud/cloud-sync.mjs',site).href),{default:config}=await import(new URL('cloud/cloud-config.js',site).href);
+ const {CloudClient,capture,encode}=await import(document.querySelector('script[src*="cloud/cloud-sync.mjs"]')?.src||new URL('cloud/cloud-sync.mjs',site).href),{default:config}=await import(new URL('cloud/cloud-config.js',site).href);
  const client=new CloudClient(config);await client.resume();
  if(action==='head')return client.head();
  if(action==='snapshot')return encode(await capture('autoreport'));
@@ -54,7 +54,7 @@ try{
  await second.locator('[data-action=upload]').click();await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('另一台裝置已更新'),{},{timeout:60000});assert.equal((await remote(first,'head')).revision,1);}
  assert.equal((await remote(first,'head')).revision,head.revision);
  console.log('PASS: stale device upload rejected without replacing cloud version.');
- const backup=second.waitForEvent('download');await second.locator('[data-action=restore]').click();await backup;await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('資料已還原'),{},{timeout:60000});
+ const backup=second.waitForEvent('download');backup.catch(()=>{});await second.locator('[data-action=restore]').click();await backup;await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('資料已還原'),{},{timeout:60000});
  assert.equal(hash(await remote(second,'snapshot')),hash(before),'Restored SQLite, file bytes and metadata must match the original snapshot.');await second.reload();
  await second.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});await second.locator('#query').fill(resume?'CLOUD-TEST-PART':'CLOUDSYNC123');await second.locator('#lookup').click();await second.locator('#searchResults').getByText('唯一匹配').waitFor();
  await second.locator('#file').setInputFiles({name:'restored-check.csv',mimeType:'text/csv',buffer:Buffer.from('產品料號\nCLOUD-TEST-PART\n')});await second.locator('#match').click();await second.waitForFunction(()=>document.querySelector('#message').textContent.includes('唯一匹配 1 筆'),{},{timeout:60000});

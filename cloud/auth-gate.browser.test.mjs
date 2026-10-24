@@ -23,7 +23,7 @@ test('analysis stays unloaded until verified login; logout, expired auth and acc
    return route.fulfill({status:404,json:{message:'not found'}});
   });
   const site=`http://127.0.0.1:${server.address().port}/`;await page.goto(site);await page.waitForSelector('.cloud-sync');
-  assert.equal(await page.locator('#analysisApp').isHidden(),true);assert.equal(appRequests.length,0,'anonymous users must not load the analysis module');
+  assert.equal(await page.locator('#analysisApp').isHidden(),true);assert.equal(appRequests.length,0,'anonymous users must not load the analysis module');await page.evaluate(()=>import('/cloud/cloud-sync.mjs?verification-copy=1'));assert.equal(await page.locator('.cloud-sync').count(),1,'reimporting the versioned module must not create a second login panel');
   await page.locator('.cloud-login [name=email]').fill('login@example.test');await page.locator('.cloud-login [name=password]').fill('test-password');
   await page.locator('[data-action=signup]').click();await page.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('查看確認信'));assert.equal(signupRedirect,true);assert.equal(appRequests.length,0);
   async function login(){await page.locator('.cloud-login [name=password]').fill('test-password');await page.locator('.cloud-login button[type=submit]').click();}
