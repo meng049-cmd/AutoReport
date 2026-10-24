@@ -1,6 +1,6 @@
 # AutoReport anonymous cloud version
 
-This is a separate public Vercel site. The regular AutoReport site keeps verified email sign-in. The anonymous site creates a Supabase anonymous Auth user in each browser and stores that user's backup in the existing private bucket under the same row and object-level RLS policies. Upload and restore remain manual.
+This is a separate public Vercel site. The regular AutoReport site keeps verified email sign-in. When a user chooses to enable cloud backup, the anonymous site creates a Supabase anonymous Auth user in that browser and stores that user's backup in the existing private bucket under the same row and object-level RLS policies. Upload and restore remain manual.
 
 Anonymous identity is tied to the browser's local storage. Clearing site data, browser storage eviction, or switching devices loses the refresh token; Supabase cannot recover that identity or its cloud backup. Users must download a local backup before changing browsers or clearing data. The anonymous version deliberately does not show a logout action.
 
