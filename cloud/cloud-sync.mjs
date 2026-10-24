@@ -126,13 +126,14 @@ export class CloudClient {
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const response = await this.fetcher(this.base + path, {method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body), credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(30000)});
-    if (!response.ok) {const error = await response.json().catch(() => ({})); if (error.code === 'PT409' || error.code === '40001') throw Error('另一台裝置已更新資料。請先下載雲端備份並比較，重新讀取版本後再上傳。'); throw Error(response.status === 401 ? '登入已失效，請重新登入。' : `雲端操作失敗（${response.status}）：${String(error.msg || error.message || error.error_description || error.error || '請稍後重試').slice(0, 200)}`);}
+    if (!response.ok) {if(response.status===401 && token && this.session){this.storage.removeItem(this.key);this.session=null;this.revision=null;if(typeof window!=='undefined')window.dispatchEvent(new Event('autoreport-auth-expired'));}const error = await response.json().catch(() => ({})); if (error.code === 'PT409' || error.code === '40001') throw Error('另一台裝置已更新資料。請先下載雲端備份並比較，重新讀取版本後再上傳。'); throw Error(response.status === 401 ? '登入已失效，請重新登入。' : `雲端操作失敗（${response.status}）：${String(error.msg || error.message || error.error_description || error.error || '請稍後重試').slice(0, 200)}`);}
     return response.status === 204 ? null : response.json();
   }
   remember(session) {this.session = session; this.revision = null; this.storage.setItem(this.key, session.refresh_token);}
   async resume() {const token = this.storage.getItem(this.key); if (!token) return false; try {this.remember(await this.request('/auth/v1/token?grant_type=refresh_token', {method: 'POST', body: {refresh_token: token}})); return true;} catch (error) {this.storage.removeItem(this.key); this.session = null; throw error;}}
   async login(email, password) {this.remember(await this.request('/auth/v1/token?grant_type=password', {method: 'POST', body: {email, password}}));}
-  async signup(email, password) {return this.request('/auth/v1/signup', {method: 'POST', body: {email, password}});}
+  async signup(email, password) {const redirect=typeof location==='undefined'?'':('?redirect_to='+encodeURIComponent(new URL('.',location.href).href));return this.request('/auth/v1/signup'+redirect, {method: 'POST', body: {email, password}});}
+  async verifiedUser() {const user=await this.request('/auth/v1/user',{token:await this.access()});if(!user.email_confirmed_at&&!user.confirmed_at)throw Error('請先完成信箱驗證，再登入使用分析。');this.session.user=user;return user;}
   async access() {
     if (!this.session) throw Error('請先登入。');
     if (this.session.expires_at * 1000 < Date.now() + 60000) {const revision = this.revision; await this.resume(); this.revision = revision;}
@@ -166,28 +167,42 @@ function saveBackup(snapshot, app) {
 function mount() {
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = new URL('./cloud-sync.css', import.meta.url); document.head.append(css);
   const panel = document.createElement('details'); panel.className = 'cloud-sync';
-  panel.innerHTML = `<summary>帳號與雲端同步</summary><p>登入後可在不同裝置上傳與還原資料。此處僅同步 AutoReport 的對照庫與檔案庫。同步需手動操作，不會自動上傳。</p><p class="cloud-status" role="status" aria-live="polite"></p><form class="cloud-login"><label>電子郵件 <input name="email" type="email" autocomplete="username" required></label><label>密碼 <input name="password" type="password" autocomplete="current-password" minlength="8" required></label><button type="submit">登入</button><button type="button" data-action="signup">註冊</button></form><div class="cloud-actions" hidden><button type="button" data-action="head">讀取雲端版本</button><button type="button" data-action="upload">上傳本機資料</button><button type="button" data-action="download">下載雲端備份</button><button type="button" data-action="restore">還原雲端資料</button><button type="button" data-action="logout">登出</button></div><p>上傳取代雲端目前版本；還原取代本裝置的網站資料。請先完成其他操作並關閉此網站的其他分頁。登出後本機資料仍保留，公用裝置請清除網站資料。每份備份上限 50 MB；分析快取不會同步。</p><label>從備份檔復原本機資料 <input class="cloud-import" type="file" accept="application/json,.json"></label>`;
-  (document.querySelector('main') || document.body).prepend(panel);
+  panel.innerHTML = `<summary>帳號與雲端同步</summary><p>登入後可在不同裝置上傳與還原資料。此處僅同步 AutoReport 的對照庫與檔案庫。同步需手動操作，不會自動上傳。</p><p class="cloud-status" role="status" aria-live="polite"></p><form class="cloud-login"><label>電子郵件 <input name="email" type="email" autocomplete="username" required></label><label>密碼 <input name="password" type="password" autocomplete="current-password" minlength="8" required></label><button type="submit">登入</button><button type="button" data-action="signup">註冊</button></form><div class="cloud-actions" hidden><button type="button" data-action="head">讀取雲端版本</button><button type="button" data-action="upload">上傳本機資料</button><button type="button" data-action="download">下載雲端備份</button><button type="button" data-action="local-backup">下載本機備份</button><button type="button" data-action="restore">還原雲端資料</button><button type="button" data-action="logout">登出</button></div><p>上傳取代雲端目前版本；還原取代本裝置的網站資料。請先完成其他操作並關閉此網站的其他分頁。登出後本機資料仍保留，公用裝置請清除網站資料。每份備份上限 50 MB；分析快取不會同步。</p><label>從備份檔復原本機資料 <input class="cloud-import" type="file" accept="application/json,.json"></label>`;
+  const app=document.getElementById('analysisApp'),gateRequired=!!app&&config.requireLoginForAnalysis!==false;
+  (app?document.body:(document.querySelector('main')||document.body)).prepend(panel);
+  if(gateRequired)panel.open=true;
   const status = panel.querySelector('.cloud-status'), form = panel.querySelector('form'), actions = panel.querySelector('.cloud-actions');
   form.onsubmit = event => event.preventDefault();
-  let client, busy = false, needsReload = false;
+  let client, busy = false, needsReload = false, verified=false, appStarted=false, expirationTimer;
+  const ownerKey='autoreport-local-owner';
+  function bootstrap(allowed){if(!app)return;document.body.classList.toggle('analysis-is-locked',!allowed);app.hidden=!allowed;app.inert=!allowed;if(allowed&&!appStarted){appStarted=true;const entry=document.getElementById('analysis-entry');if(entry){const script=document.createElement('script');script.type='module';script.src=JSON.parse(entry.textContent).src;document.body.append(script);}}}
+  bootstrap(!gateRequired);
+  const switchAccount=document.createElement('button');switchAccount.type='button';switchAccount.textContent='切換帳號並清除本機副本';switchAccount.hidden=true;panel.append(switchAccount);
+  const logoutButton=panel.querySelector('[data-action=logout]');panel.append(logoutButton);logoutButton.hidden=true;
+  async function verifySession(){verified=false;const user=await client.verifiedUser();verified=true;clearTimeout(expirationTimer);expirationTimer=setTimeout(()=>{verified=false;render();show('登入已到期，請重新登入後使用分析。');},Math.max(0,client.session.expires_at*1000-Date.now()));if(gateRequired&&!localStorage.getItem(ownerKey))localStorage.setItem(ownerKey,user.id);}
+
   const show = message => {status.textContent = message;};
-  const render = () => {form.hidden = !!client?.session; actions.hidden = !client?.session; if (!client) form.querySelectorAll('input,button').forEach(el => el.disabled = true);};
+  const render = () => {const authenticated=!!client?.session&&verified,ownerMatches=!gateRequired||localStorage.getItem(ownerKey)===client?.session?.user?.id;form.hidden=authenticated;actions.hidden=!(authenticated&&ownerMatches);switchAccount.hidden=!(authenticated&&!ownerMatches);logoutButton.hidden=!client?.session;panel.querySelector('.cloud-import').disabled=!(authenticated&&ownerMatches);bootstrap(!gateRequired||(authenticated&&ownerMatches));if(authenticated&&!ownerMatches)show('此瀏覽器保留另一個帳號的資料。請由原帳號先備份，再清除本機副本以切換；不會將舊檔顯示或上傳給目前帳號。');if(!client)form.querySelectorAll('input,button').forEach(el=>el.disabled=true);};
+  window.addEventListener('storage',event=>{if(event.key===ownerKey)render();});
+  logoutButton.onclick=()=>run(async()=>{verified=false;clearTimeout(expirationTimer);render();await client.logout();show('已登出；本機資料仍保留，分析已鎖定。');});
+  window.addEventListener('autoreport-auth-expired',()=>{verified=false;render();show('登入已失效，請重新登入。');});
+  switchAccount.onclick=()=>run(async()=>{if(!confirm('將清除前一帳號的本機副本，不會匯出給新帳號。若原帳號尚未備份，請取消並重新登入原帳號先備份。雲端資料不受影響。請關閉其他分頁，確定切換？'))return;const empty={format:1,app:config.app,databases:{'AutoReport-local-database':{state:{keys:[],values:[]}},'AutoReport-file-library':{files:{keys:[],values:[]}}},local:{}};await restore(empty,config.app);localStorage.setItem(ownerKey,client.session.user.id);location.reload();});
   async function run(action) {if (busy) return; busy = true; const controls = [...panel.querySelectorAll('button,input')]; controls.forEach(el => el.disabled = true); try {await action();} catch (error) {show(error.message);} finally {busy = false; controls.forEach(el => el.disabled = needsReload); render();}}
   const replace = async snapshot => {await saveBackup(await capture(config.app), config.app); if (!confirm('已開始下載本機備份。請先確認備份已保留，並關閉此網站的其他分頁。繼續將取代本裝置的網站資料，之後須重新整理。')) return; await restore(snapshot, config.app); needsReload = true; show('資料已還原。請重新整理網頁後使用。'); const reload = document.createElement('button'); reload.textContent = '重新整理'; reload.onclick = () => location.reload(); status.append(' ', reload);};
   panel.querySelector('.cloud-import').onchange = event => run(async () => {const file = event.target.files[0]; if (!file) return; if (file.size > MAX_BYTES) throw Error('備份檔超過 50 MB。'); await replace(validateSnapshot(decode(JSON.parse(await file.text())), config.app));});
   if (!config.url || !config.publishableKey) {show('尚未設定雲端服務；目前資料仍保存在此瀏覽器。請依雲端設定說明啟用。'); form.querySelectorAll('input,button').forEach(el => el.disabled = true); return;}
   try {client = new CloudClient(config);} catch (error) {show(error.message); render(); return;}
   async function head() {const remote = await client.head(); show(`已登入 ${client.session.user.email} · 雲端版本 ${remote.revision}${remote.updated_at ? ' · ' + new Date(remote.updated_at).toLocaleString() : '（尚無資料）'}`); return remote;}
-  form.onsubmit = event => {event.preventDefault(); run(async () => {await client.login(form.email.value, form.password.value); form.password.value = ''; await head();});};
+  form.onsubmit = event => {event.preventDefault(); run(async () => {await client.login(form.email.value, form.password.value); form.password.value = ''; await verifySession(); await head();});};
   panel.querySelector('[data-action="signup"]').onclick = () => {if (!form.reportValidity()) return; run(async () => {const result = await client.signup(form.email.value, form.password.value); form.password.value = ''; show(result.session || result.access_token ? '註冊成功，請按登入。' : '註冊申請已送出，請查看確認信；完成信箱驗證後回來登入。');});};
   actions.onclick = event => {const action = event.target.dataset.action; if (!action) return; run(async () => {
     if (action === 'head') await head();
-    if (action === 'logout') {await client.logout(); show('已登出；本機資料仍保留。');}
+    if (action === 'logout') {verified=false;clearTimeout(expirationTimer);render();await client.logout();show('已登出；本機資料仍保留，分析已鎖定。');}
     if (action === 'upload') {if (client.revision === null) await head(); if (!confirm(`將本裝置資料上傳至 ${client.session.user.email}，取代雲端版本 ${client.revision}。這可能包含工單與個人資料。確定繼續？`)) return; show('正在上傳，請勿關閉網頁…'); const revision = await client.upload(await capture(config.app)); show(`上傳完成 · 雲端版本 ${revision}。其他裝置請登入後還原。`);}
+    if(action==='local-backup'){await saveBackup(await capture(config.app),config.app);show('本機備份已下載，尚未上傳的資料也會包含。');}
     if (action === 'download') {await saveBackup(await client.download(), config.app); show('雲端備份已下載，本機資料未變更。');}
     if (action === 'restore') {show('正在下載雲端資料…'); await replace(await client.download());}
   });};
-  run(async () => {if (await client.resume()) await head(); else show('尚未登入。');});
+  run(async () => {if(await client.resume()){await verifySession();await head();}else show(gateRequired?'請註冊並完成信箱驗證，登入後即可使用分析。':'尚未登入。');});
 }
 if (typeof document !== 'undefined') {if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once: true}); else mount();}
