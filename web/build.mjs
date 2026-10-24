@@ -23,3 +23,6 @@ await mkdir('dist/browser-python');await copyFile('autoreport.py','dist/browser-
 await mkdir('dist/vendor/pyodide');await mkdir('dist/vendor/python');
 for(const name of ['pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdlib.zip','pyodide-lock.json','sqlite3-1.0.0-cp312-cp312-pyodide_2024_0_wasm32.whl','LICENSE'])await copyFile('vendor/pyodide/'+name,'dist/vendor/pyodide/'+name);
 for(const name of ['openpyxl-3.1.5-py2.py3-none-any.whl','et_xmlfile-2.0.0-py3-none-any.whl','opencc_python_reimplemented-0.1.7-py2.py3-none-any.whl'])await copyFile('vendor/python/'+name,'dist/vendor/python/'+name);
+
+await mkdir('dist/cloud');
+for (const name of ['cloud-sync.mjs','cloud-sync.css','cloud-config.js']) await copyFile('cloud/'+name, 'dist/cloud/'+name);
