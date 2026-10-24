@@ -164,12 +164,17 @@ export class CloudClient {
 function saveBackup(snapshot, app) {
   return encode(snapshot).then(value => {const url = URL.createObjectURL(new Blob([JSON.stringify(value)], {type: 'application/json'})); const a = document.createElement('a'); a.href = url; a.download = `${app}-before-sync-${Date.now()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);});
 }
+function needsLoginForAnalysis(settings, pageLocation = globalThis.location) {
+  if (settings.requireLoginForAnalysis === false) return false;
+  if (!pageLocation) return true;
+  return pageLocation.protocol !== 'file:' && !['localhost', '127.0.0.1', '[::1]'].includes(pageLocation.hostname);
+}
 function mount() {
   if(document.querySelector('.cloud-sync'))return;
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = new URL('./cloud-sync.css', import.meta.url); document.head.append(css);
   const panel = document.createElement('details'); panel.className = 'cloud-sync';
-  panel.innerHTML = `<summary>帳號與雲端同步</summary><p>登入後可在不同裝置上傳與還原資料。此處僅同步 AutoReport 的對照庫與檔案庫。同步需手動操作，不會自動上傳。</p><p class="cloud-status" role="status" aria-live="polite"></p><form class="cloud-login"><label>電子郵件 <input name="email" type="email" autocomplete="username" required></label><label>密碼 <input name="password" type="password" autocomplete="current-password" minlength="8" required></label><button type="submit">登入</button><button type="button" data-action="signup">註冊</button></form><div class="cloud-actions" hidden><button type="button" data-action="head">讀取雲端版本</button><button type="button" data-action="upload">上傳本機資料</button><button type="button" data-action="download">下載雲端備份</button><button type="button" data-action="local-backup">下載本機備份</button><button type="button" data-action="restore">還原雲端資料</button><button type="button" data-action="logout">登出</button></div><p>上傳取代雲端目前版本；還原取代本裝置的網站資料。請先完成其他操作並關閉此網站的其他分頁。登出後本機資料仍保留，公用裝置請清除網站資料。每份備份上限 50 MB；分析快取不會同步。</p><label>從備份檔復原本機資料 <input class="cloud-import" type="file" accept="application/json,.json"></label>`;
-  const app=document.getElementById('analysisApp'),gateRequired=!!app&&config.requireLoginForAnalysis!==false;
+  panel.innerHTML = `<summary>帳號與雲端同步</summary><p>本機開發環境可免登入使用分析。外部網站需註冊並完成信箱驗證、登入後才能分析；登入帳號也用來區分各人的雲端備份。此處只同步 AutoReport 的對照庫與檔案庫，需手動操作，不會自動上傳。</p><p class="cloud-status" role="status" aria-live="polite"></p><form class="cloud-login"><label>電子郵件 <input name="email" type="email" autocomplete="username" required></label><label>密碼 <input name="password" type="password" autocomplete="current-password" minlength="8" required></label><button type="submit">登入</button><button type="button" data-action="signup">註冊</button></form><div class="cloud-actions" hidden><button type="button" data-action="head">讀取雲端版本</button><button type="button" data-action="upload">上傳本機資料</button><button type="button" data-action="download">下載雲端備份</button><button type="button" data-action="local-backup">下載本機備份</button><button type="button" data-action="restore">還原雲端資料</button><button type="button" data-action="logout">登出</button></div><p>上傳會建立此帳號的新雲端版本，取代它先前的目前版本；還原會取代本裝置的網站資料。先完成其他操作並關閉此網站的其他分頁。登出後本機資料仍保留，公用裝置請清除網站資料。每份備份上限 50 MB；分析快取不會同步。</p><label>從備份檔復原本機資料 <input class="cloud-import" type="file" accept="application/json,.json"></label>`;
+  const app=document.getElementById('analysisApp'),gateRequired=!!app&&needsLoginForAnalysis(config);
   (app?document.body:(document.querySelector('main')||document.body)).prepend(panel);
   if(gateRequired)panel.open=true;
   const status = panel.querySelector('.cloud-status'), form = panel.querySelector('form'), actions = panel.querySelector('.cloud-actions');
@@ -180,10 +185,10 @@ function mount() {
   bootstrap(!gateRequired);
   const switchAccount=document.createElement('button');switchAccount.type='button';switchAccount.textContent='切換帳號並清除本機副本';switchAccount.hidden=true;panel.append(switchAccount);
   const logoutButton=panel.querySelector('[data-action=logout]');panel.append(logoutButton);logoutButton.hidden=true;
-  async function verifySession(){verified=false;const user=await client.verifiedUser();verified=true;clearTimeout(expirationTimer);expirationTimer=setTimeout(()=>{verified=false;render();show('登入已到期，請重新登入後使用分析。');},Math.max(0,client.session.expires_at*1000-Date.now()));if(gateRequired&&!localStorage.getItem(ownerKey))localStorage.setItem(ownerKey,user.id);}
+  async function verifySession(){verified=false;const user=await client.verifiedUser();verified=true;clearTimeout(expirationTimer);expirationTimer=setTimeout(()=>{verified=false;render();show('登入已到期，請重新登入後使用分析。');},Math.max(0,client.session.expires_at*1000-Date.now()));if(!localStorage.getItem(ownerKey))localStorage.setItem(ownerKey,user.id);}
 
   const show = message => {status.textContent = message;};
-  const render = () => {const authenticated=!!client?.session&&verified,ownerMatches=!gateRequired||localStorage.getItem(ownerKey)===client?.session?.user?.id;form.hidden=authenticated;actions.hidden=!(authenticated&&ownerMatches);switchAccount.hidden=!(authenticated&&!ownerMatches);logoutButton.hidden=!client?.session;panel.querySelector('.cloud-import').disabled=!(authenticated&&ownerMatches);bootstrap(!gateRequired||(authenticated&&ownerMatches));if(authenticated&&!ownerMatches)show('此瀏覽器保留另一個帳號的資料。請由原帳號先備份，再清除本機副本以切換；不會將舊檔顯示或上傳給目前帳號。');if(!client)form.querySelectorAll('input,button').forEach(el=>el.disabled=true);};
+  const render = () => {const authenticated=!!client?.session&&verified,ownerMatches=!authenticated||!localStorage.getItem(ownerKey)||localStorage.getItem(ownerKey)===client?.session?.user?.id;form.hidden=authenticated;actions.hidden=!(authenticated&&ownerMatches);switchAccount.hidden=!(authenticated&&!ownerMatches);logoutButton.hidden=!client?.session;panel.querySelector('.cloud-import').disabled=!(authenticated&&ownerMatches);bootstrap(!gateRequired||(authenticated&&ownerMatches));if(authenticated&&!ownerMatches)show('此瀏覽器保留另一個帳號的資料。請由原帳號先備份，再清除本機副本以切換；不會將舊檔顯示或上傳給目前帳號。');if(!client)form.querySelectorAll('input,button').forEach(el=>el.disabled=true);};
   window.addEventListener('storage',event=>{if(event.key===ownerKey)render();});
   logoutButton.onclick=()=>run(async()=>{verified=false;clearTimeout(expirationTimer);render();await client.logout();show('已登出；本機資料仍保留，分析已鎖定。');});
   window.addEventListener('autoreport-auth-expired',()=>{verified=false;render();show('登入已失效，請重新登入。');});
