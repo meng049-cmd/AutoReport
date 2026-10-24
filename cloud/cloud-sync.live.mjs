@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import {chromium} from '@playwright/test';
 import {createHash} from 'node:crypto';
 import ExcelJS from 'exceljs';
-const names=['AUTOREPORT_TEST_EMAIL','AUTOREPORT_TEST_PASSWORD','AUTOREPORT_TEST_EMAIL_B','AUTOREPORT_TEST_PASSWORD_B'];
+const names=process.env.AUTOREPORT_SKIP_ACCOUNT_B==='1'?['AUTOREPORT_TEST_EMAIL','AUTOREPORT_TEST_PASSWORD']:['AUTOREPORT_TEST_EMAIL','AUTOREPORT_TEST_PASSWORD','AUTOREPORT_TEST_EMAIL_B','AUTOREPORT_TEST_PASSWORD_B'];
 if(names.some(name=>!process.env[name])){console.error('Missing secure test-account settings: '+names.filter(name=>!process.env[name]).join(', '));process.exit(2);}
-for(const name of ['AUTOREPORT_TEST_EMAIL','AUTOREPORT_TEST_EMAIL_B']){if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(process.env[name])){console.error('Invalid email format in '+name+'; update its value in environment settings.');process.exit(2);}}
+for(const name of names.filter(name=>name.includes('EMAIL'))){if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(process.env[name])){console.error('Invalid email format in '+name+'; update its value in environment settings.');process.exit(2);}}
 const site=(process.env.LIVE_SITE_URL||'https://meng049-cmd.github.io/AutoReport/').replace(/\/?$/,'/');
 const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox'],...(process.env.HTTPS_PROXY?{proxy:{server:process.env.HTTPS_PROXY,bypass:'localhost,127.0.0.1'}}:{})});
 async function login(page,email,password){
@@ -34,7 +34,8 @@ try{
  for(const page of [first,second,other])page.on('dialog',dialog=>dialog.accept());
  await login(first,process.env.AUTOREPORT_TEST_EMAIL,process.env.AUTOREPORT_TEST_PASSWORD);
  await login(second,process.env.AUTOREPORT_TEST_EMAIL,process.env.AUTOREPORT_TEST_PASSWORD);
- const resume=process.env.AUTOREPORT_RESUME_ACCOUNT_A==='1';let before,head;
+ const initialHead=await remote(first,'head');
+ const resume=process.env.AUTOREPORT_RESUME_ACCOUNT_A==='auto'?initialHead.revision>0:process.env.AUTOREPORT_RESUME_ACCOUNT_A==='1';let before,head;
  if(!resume)assert.equal((await remote(first,'head')).revision,0,'Use new dedicated test accounts with no cloud backups.');
  console.log('PASS: account A logs in on two independent device sessions.');
  if(!resume){
@@ -58,7 +59,7 @@ try{
  await second.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});await second.locator('#query').fill(resume?'CLOUD-TEST-PART':'CLOUDSYNC123');await second.locator('#lookup').click();await second.locator('#searchResults').getByText('唯一匹配').waitFor();
  await second.locator('#file').setInputFiles({name:'restored-check.csv',mimeType:'text/csv',buffer:Buffer.from('產品料號\nCLOUD-TEST-PART\n')});await second.locator('#match').click();await second.waitForFunction(()=>document.querySelector('#message').textContent.includes('唯一匹配 1 筆'),{},{timeout:60000});
  console.log('PASS: second device restores identical SQLite/files, queries the imported part and uniquely matches a fresh CSV.');
- if(process.env.AUTOREPORT_SKIP_ACCOUNT_B==='1'){console.log('NOT RUN: account B isolation requires corrected test credentials.');process.exitCode=2;} else {
+ if(process.env.AUTOREPORT_SKIP_ACCOUNT_B==='1'){console.log('NOT RUN: cross-account isolation is outside this single-account run.');} else {
  await login(other,process.env.AUTOREPORT_TEST_EMAIL_B,process.env.AUTOREPORT_TEST_PASSWORD_B);
  assert.equal((await remote(other,'head')).revision,0);const denied=await remote(other,'foreign',head.object_path);assert.ok(denied.status>=400,'Other account must not download the snapshot.');assert.equal(denied.body,null);
  console.log('PASS: account B cannot list account A workspace or download account A private snapshot.');

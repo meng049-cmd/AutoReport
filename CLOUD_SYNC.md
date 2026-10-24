@@ -74,6 +74,8 @@ node cloud/cloud-sync.live.mjs
 
 這個明確啟動的檢查會在正式網站使用三個獨立瀏覽器工作階段：真實登入、匯入合成 Excel、比對合成 CSV、上傳、拒絕舊版本覆寫、第二台裝置還原後查詢，以及第二帳號不能讀取第一帳號檔案。僅使用測試帳號，測試備份保留供檢查。不會建立帳號、寄信或清除既有雲端資料；若測試帳號已有備份會停止。缺少測試帳號設定時以非零狀態停止，不宣稱同步已通過。
 
-若專用測試帳號 A 已完成合成測試資料上傳，可設定 AUTOREPORT_RESUME_ACCOUNT_A=1，僅讀取既有備份並驗證還原，不覆寫雲端資料。帳號 B 尚待修正時，可設定 AUTOREPORT_SKIP_ACCOUNT_B=1 執行 A 的部分驗證；程式會明確標記隔離測試未執行，並以非零狀態結束。
+若專用測試帳號 A 已完成合成測試資料上傳，可設定 AUTOREPORT_RESUME_ACCOUNT_A=1，僅讀取既有備份並驗證還原，不覆寫雲端資料。帳號 B 尚待修正時，可設定 AUTOREPORT_SKIP_ACCOUNT_B=1 執行 A 的部分驗證；程式會明確標記隔離測試未執行；單一帳號範圍的測試通過不代表跨帳號隔離已驗證。
 
 若舊版本衝突 RPC 發生逾時，請在 SQL Editor 執行 supabase/fix-conflict-response.sql，讓原子版本衝突明確回傳 HTTP 409。新版客戶端也會先檢查版本並限制請求等待時間；這些保護不能取代伺服器的原子版本檢查。
+
+只保留一個帳號時，可使用 `AUTOREPORT_RESUME_ACCOUNT_A=auto AUTOREPORT_SKIP_ACCOUNT_B=1 node cloud/cloud-sync.live.mjs`。此模式只要求 A 的兩個設定值，若已存在備份則僅讀取驗證，不覆寫雲端資料；跨帳號隔離明確標記未執行。
