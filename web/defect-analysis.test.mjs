@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);
@@ -112,4 +112,14 @@ test('top quality summary recalculates date-range PPID unions and scoped failure
 });
 test('a repeated FAIL inside a selected interval still lowers its quality yield even when globally attributed earlier',()=>{
  const analysis={observations:[{serial:'a',date:'2026-06-02',process:'P1',fail:true},{serial:'a',date:'2026-06-03',process:'P2',fail:true},{serial:'b',date:'2026-06-03',process:'P2',fail:false}],attribution:[{serial:'a',date:'2026-06-02',process:'P1'}]};const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.equal(attributedRows(analysis,scope).length,0);assert.deepEqual(scopedQualitySummary(analysis,scope),{total:2,fail:1,good:1,yield:.5,badRate:.5});
+});
+
+test('date and process chart values use each column own PPID input instead of whole-file contributions',()=>{
+ const analysis=fixture(),scope={startDate:'2026-10-05',endDate:'2026-10-07'},dates=defectBreakdown(analysis,scope,[],defectDimensions('date')),day=dates.groups.find(row=>row.key==='2026-10-06');
+ assert.equal(analysis.total,5);assert.equal(day.input,1);assert.equal(day.count,1);assert.equal(day.contribution,.2);assert.equal(defectChartValue(day,'date'),1);assert.equal(defectChartValue(dates.groups[0],'date'),2/4);assert.equal(defectChartValue(dates.groups[2],'date'),0);
+ const processes=defectBreakdown(analysis,{...scope,date:'2026-10-05'},[],defectDimensions('date')),p1=processes.groups.find(row=>row.key==='P1');assert.equal(p1.input,4);assert.equal(p1.count,2);assert.equal(defectChartValue(p1,'process'),.5);assert.notEqual(defectChartValue(p1,'process'),p1.contribution);
+ const empty=defectBreakdown(analysis,{...scope,endDate:'2026-10-08'},[],defectDimensions('date')).groups.at(-1);assert.equal(empty.input,0);assert.equal(defectChartValue(empty,'date'),null);assert.equal(usesGroupInputRate('process'),true);assert.equal(defectChartValue(day,'product'),day.contribution,'product whole-file contribution remains a separate calculation');
+});
+test('adding other selected dates does not dilute a date column PPID denominator or rate',()=>{
+ const analysis=fixture(),order=defectDimensions('date'),narrow=defectBreakdown(analysis,{startDate:'2026-10-06',endDate:'2026-10-06'},[],order).groups[0],wide=defectBreakdown(analysis,{startDate:'2026-10-05',endDate:'2026-10-08'},[],order).groups.find(row=>row.key==='2026-10-06');assert.equal(narrow.input,1);assert.equal(wide.input,1);assert.equal(defectChartValue(narrow,'date'),1);assert.equal(defectChartValue(wide,'date'),1);
 });

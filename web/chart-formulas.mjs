@@ -1,4 +1,4 @@
-import {dateInputAudits,dimensionNames} from './defect-analysis.mjs';
+import {usesGroupInputRate,dateInputAudits,dimensionNames} from './defect-analysis.mjs';
 const pct=value=>Number.isFinite(value)?(value*100).toFixed(4)+'%':'—';
 const ratio=(good,input)=>input?`${good} ÷ ${input} = ${pct(good/input)}`:'無投入，留白';
 function text(host,value){const line=document.createElement('p');line.textContent=value;host.append(line);}
@@ -46,11 +46,11 @@ export function contributionFormulaDetails(analysis,view,scope){
  const details=document.createElement('details');details.className='formula-notes contribution-formulas';details.dataset.dimension=view.dimension;const summary=document.createElement('summary');summary.textContent='本層公式、投入去重與口徑比較';details.append(summary);
  let loaded=false;details.addEventListener('toggle',()=>{
   if(!details.open||loaded)return;loaded=true;
-  text(details,`目前橫軸：${dimensionNames[view.dimension]}。全檔唯一投入 N全檔 = ${analysis.total}；這是全檔貢獻欄的固定母數；不良項目柱另用其所屬製程的唯一投入。只計前段（DAF熱壓投入、DAF外觀、功能一測試）與後段（輝度機測試、功能二測試、外觀檢查點亮測試）；其他製程紀錄不計。`);
+  text(details,`目前橫軸：${dimensionNames[view.dimension]}。全檔唯一投入 N全檔 = ${analysis.total}；這是全檔貢獻欄的固定母數；日期、製程與不良項目柱均用各自唯一投入，不引用全檔或選取區間合計作每根柱的母數。只計前段（DAF熱壓投入、DAF外觀、功能一測試）與後段（輝度機測試、功能二測試、外觀檢查點亮測試）；其他製程紀錄不計。`);
   details.append(table(['數字','公式','與其他數字的差異'],[
-   view.dimension==='defect'?['本層長條高度（製程內項目不良率）','R(製程,項目) = 此製程此項唯一不良 PPID ÷ 同條件下此製程唯一投入 PPID','按製程＋項目分組；同名跨製程分開，投入不使用階段合計；各項比率不跨製程相加。']:['本層長條高度（全檔不良率貢獻）','C(g) = 首次歸屬此群的不良 PPID B(g) ÷ N全檔','全檔貢獻固定全檔母數；與不良項目圖的製程內不良率不同。'],
+   view.dimension==='date'?['本層長條高度（日期不良率）','R(日) = 當日首次歸屬唯一不良PPID ÷ 當日各納入製程投入PPID聯集大小','每根日期柱只用當天母數；同片跨製程只算1，不用全部選取日期總投入。週／月則只用該柱所屬週／月的唯一投入。']:view.dimension==='process'?['本層長條高度（製程不良率）','R(製程) = 歸屬該製程唯一不良PPID ÷ 同條件下該製程唯一投入PPID','各製程各用自身母數，包含良品及不良品；不用階段合計或其他製程投入。']:view.dimension==='defect'?['本層長條高度（製程內項目不良率）','R(製程,項目) = 此製程此項唯一不良PPID ÷ 同條件下此製程唯一投入PPID','按製程＋項目分組；同名跨製程分開。']:['本層長條高度（全檔不良率貢獻）','C(g) = 首次歸屬此群的不良PPID B(g) ÷ N全檔','產品全檔貢獻仍用固定全檔母數，其他層用各柱自身母數。'],
    ['長條旁投入','N(g) = 符合日期／所屬製程／產品／工單範圍的 PPID 聯集大小','包含良品與不良品；不按不良項目縮小母數。'],
-   ['該群歸屬不良率','R(g) = B(g) ÷ N(g)','只在群內計比例，與長條的全檔貢獻不同。'],
+   ['該群歸屬不良率','R(g) = B(g) ÷ N(g)',usesGroupInputRate(view.dimension)?'即本層長條值；各日期／製程母數不同，不直接相加百分比。':'只在群內計比例，與產品全檔貢獻不同。'],
    ['唯一 PPID 全檔總良率','Y全檔 = (N全檔 − 全檔唯一不良 PPID) ÷ N全檔','全檔每片只計一次；不是各日期／製程百分比的算術平均。'],
   ]));
   if(view.dimension==='date'){

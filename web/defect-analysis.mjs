@@ -2,6 +2,8 @@ import {isStageProcess,summarizeStage} from './stage-metrics.mjs';
 export const dimensions=['product','date','process','defect'];
 export const dimensionNames={product:'產品',date:'日期',process:'製程',defect:'不良項目'};
 export function defectDimensions(first='product'){if(first==='date')return ['date','process','defect','product'];return ['product','defect'].includes(first)?[first,...dimensions.filter(key=>key!==first)]:[...dimensions];}
+export const usesGroupInputRate=dimension=>['date','process','defect'].includes(dimension);
+export const defectChartValue=(group,dimension)=>usesGroupInputRate(dimension)?group.rate:group.contribution;
 const defectPrefix='process-defect:';
 export const defectKey=(process,defect)=>defectPrefix+JSON.stringify([process,defect]);
 export function parseDefectKey(value){
