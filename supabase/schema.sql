@@ -34,7 +34,7 @@ begin
   update public.autoreport_workspaces set revision = revision + 1, object_path = p_object_path, updated_at = now()
     where user_id = auth.uid() and app = p_app and revision = p_expected_revision
     returning revision into next_revision;
-  if next_revision is null then raise exception 'Workspace changed on another device' using errcode = '40001'; end if;
+  if next_revision is null then raise exception 'Workspace changed on another device' using errcode = 'PT409'; end if;
   return next_revision;
 end;
 $$;

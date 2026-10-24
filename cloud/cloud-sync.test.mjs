@@ -14,7 +14,7 @@ test('reject malformed or foreign snapshots before any local restore', () => {
  assert.equal(validateSnapshot(empty(),'autoreport').format,1);
 });
 function fakeBackend(){
- const tokens=new Map(),objects=new Map(),heads=new Map(),calls=[];let counter=0;
+ const tokens=new Map(),objects=new Map(),heads=new Map(),calls=[],race={commit:false};let counter=0;
  const fetcher=async (url,options={})=>{
   const path=new URL(url).pathname,body=options.body&&JSON.parse(options.body),token=options.headers.Authorization?.replace('Bearer ',''),user=tokens.get(token);calls.push({path,options});
   const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
@@ -24,11 +24,11 @@ function fakeBackend(){
   if(path==='/storage/v1/object/autoreport-sync' && options.method==='DELETE'){for(const key of body.prefixes){if(!key.startsWith(user+'/'))return reply({},403);objects.delete(key);}return reply({});}
   const prefix='/storage/v1/object/autoreport-sync/';
   if(path.startsWith(prefix)){const key=path.slice(prefix.length);if(!key.startsWith(user+'/'))return reply({},403);if(options.method==='DELETE'){objects.delete(key);return reply({});}objects.set(key,body);return reply({Key:key});}
-  if(path==='/rest/v1/rpc/commit_autoreport_workspace'){const old=heads.get(user)||{revision:0};if(old.revision!==body.p_expected_revision)return reply({code:'40001'},409);const next={revision:old.revision+1,object_path:body.p_object_path};heads.set(user,next);return reply(next.revision);}
+  if(path==='/rest/v1/rpc/commit_autoreport_workspace'){if(race.commit)return reply({code:'PT409'},409);const old=heads.get(user)||{revision:0};if(old.revision!==body.p_expected_revision)return reply({code:'PT409'},409);const next={revision:old.revision+1,object_path:body.p_object_path};heads.set(user,next);return reply(next.revision);}
   if(path.startsWith('/storage/v1/object/authenticated/autoreport-sync/')){const key=path.split('/autoreport-sync/')[1];if(!key.startsWith(user+'/'))return reply({},403);return reply(objects.get(key));}
   return reply({});
  };
- return {fetcher,objects,calls};
+ return {fetcher,objects,calls,race};
 }
 function client(backend,app='autoreport'){const map=new Map();return new CloudClient({url:'https://test.supabase.co',publishableKey:'public-key',app},{fetcher:backend.fetcher,session:{getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)}});}
 test('two devices cannot silently overwrite a newer cloud version; failed commit removes only its own upload',async()=>{
@@ -41,3 +41,5 @@ test('upload requires login and a loaded baseline; rejects oversized content bef
 });
 
 test('refuses non-HTTPS endpoints and privileged server credentials',()=>{const options={fetcher:async()=>{},session:{}};for(const settings of [{url:'http://test.supabase.co',publishableKey:'public'},{url:'https://test.supabase.co',publishableKey:'sb_secret_do-not-publish'},{url:'https://test.supabase.co',publishableKey:'x.'+btoa(JSON.stringify({role:'service_role'}))+'.x'}])assert.throws(()=>new CloudClient({...settings,app:'autoreport'},options));});
+
+test('atomic conflict after preflight deletes the uncommitted upload',async()=>{const backend=fakeBackend(),a=client(backend);await a.login('a@example.com','password');await a.head();backend.race.commit=true;await assert.rejects(()=>a.upload(empty()),/另一台裝置/);assert.equal(backend.objects.size,0);assert.ok(backend.calls.some(call=>call.path==='/rest/v1/rpc/commit_autoreport_workspace'));});

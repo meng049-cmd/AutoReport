@@ -125,8 +125,8 @@ export class CloudClient {
     const headers = {apikey: this.config.publishableKey};
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    const response = await this.fetcher(this.base + path, {method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body), credentials: 'omit', cache: 'no-store'});
-    if (!response.ok) {const error = await response.json().catch(() => ({})); if (error.code === '40001') throw Error('另一台裝置已更新資料。請先下載雲端備份並比較，重新讀取版本後再上傳。'); throw Error(response.status === 401 ? '登入已失效，請重新登入。' : `雲端操作失敗（${response.status}）：${String(error.msg || error.message || error.error_description || error.error || '請稍後重試').slice(0, 200)}`);}
+    const response = await this.fetcher(this.base + path, {method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body), credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(30000)});
+    if (!response.ok) {const error = await response.json().catch(() => ({})); if (error.code === 'PT409' || error.code === '40001') throw Error('另一台裝置已更新資料。請先下載雲端備份並比較，重新讀取版本後再上傳。'); throw Error(response.status === 401 ? '登入已失效，請重新登入。' : `雲端操作失敗（${response.status}）：${String(error.msg || error.message || error.error_description || error.error || '請稍後重試').slice(0, 200)}`);}
     return response.status === 204 ? null : response.json();
   }
   remember(session) {this.session = session; this.revision = null; this.storage.setItem(this.key, session.refresh_token);}
@@ -143,13 +143,15 @@ export class CloudClient {
   async download(head) {
     const current = head || await this.head(); if (!current.object_path) throw Error('此帳號尚無雲端備份。');
     const prefix = `${this.session.user.id}/${this.config.app}/`; if (!current.object_path.startsWith(prefix)) throw Error('雲端檔案路徑不符。');
-    const response = await this.fetcher(`${this.base}/storage/v1/object/authenticated/autoreport-sync/${current.object_path}`, {headers: {apikey: this.config.publishableKey, Authorization: `Bearer ${await this.access()}`}, credentials: 'omit', cache: 'no-store'});
+    const response = await this.fetcher(`${this.base}/storage/v1/object/authenticated/autoreport-sync/${current.object_path}`, {headers: {apikey: this.config.publishableKey, Authorization: `Bearer ${await this.access()}`}, credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(30000)});
     if (!response.ok) throw Error(`雲端備份下載失敗（${response.status}）。`);
     const blob = await response.blob(); if (blob.size > MAX_BYTES) throw Error('雲端備份超過 50 MB 上限。');
     return validateSnapshot(decode(JSON.parse(await blob.text())), this.config.app);
   }
   async upload(snapshot) {
     validateSnapshot(snapshot, this.config.app); if (this.revision === null) throw Error('請先讀取雲端版本。');
+    const baseline = this.revision; const latest = await this.head(); this.revision = baseline;
+    if (latest.revision !== baseline) throw Error('另一台裝置已更新資料。請先下載雲端備份並比較，重新讀取版本後再上傳。');
     const data = JSON.stringify(await encode(snapshot)); if (new Blob([data]).size > MAX_BYTES) throw Error('同步備份上限 50 MB（含編碼）；請減少檔案後重試。');
     const token = await this.access(), path = `${this.session.user.id}/${this.config.app}/${crypto.randomUUID()}.json`;
     await this.request(`/storage/v1/object/autoreport-sync/${path}`, {method: 'POST', token, body: data, raw: true});
