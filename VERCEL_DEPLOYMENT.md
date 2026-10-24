@@ -41,3 +41,11 @@ Supabase Auth 的使用者是網站帳號，不是電腦登入帳號，也不是
 每次建置會產生 `/release.json`，可比對 `buildId`、`sourceCommit`、`requireLoginForAnalysis` 與 `supabaseHost`，以驗證 GitHub Pages 與 Vercel 是否部署相同來源。該檔不含密碼或機密金鑰。
 
 既有 `web/browser.spec.mjs` 的完整報表流程有已知基線失敗：其工作表順序與階段製程等舊規格不符現行報表。此變更只為該測試補上登入情境與正確 JavaScript MIME，不刪除舊斷言，也不將全套瀏覽器測試宣稱為已通過。登入專項、同步測試、分析單元測試與本機資料庫瀏覽器測試已另行驗證。
+
+## 已完成的 Vercel Production 部署
+
+正式網址為 https://auto-report-five.vercel.app/ ，專案 `project1-dc31/auto-report`（不是單次部署的隨機網址）。已連結 GitHub `meng049-cmd/AutoReport` 的 main 分支。專案設定已改為 Framework Other、Node 24、安裝 `npm ci --include=dev`、建置 `bash scripts/build-vercel.sh`、輸出 dist。已以 Vercel Build Output API 的預先建置靜態成品部署，平台回報 READY；部署內的 release.json 已透過授權 API 核對與 Git 來源一致。
+
+Vercel SSO 保護改為 `prod_deployment_urls_and_all_previews`，保留預覽與單次部署網址的保護，讓正式 Production 別名不需先登入 Vercel；AutoReport 自己的登入與 Supabase RLS 仍保留。正式網域的 Codex 網路允許設定已另存草稿，須套用後才能完成實站瀏覽器核對。Supabase 的 Site URL 與 Redirect URLs 應使用正式網址，不可繼續指向 localhost。
+
+Vercel CLI 產生的 .env.local 與 .vercel 內容僅供本機部署，已排除 Git 版本控制，不可提交其中的登入或 OIDC 資訊。

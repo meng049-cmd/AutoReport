@@ -1,3 +1,5 @@
+正式網站：https://auto-report-five.vercel.app/ 。使用者須註冊、完成信箱驗證並登入後使用分析；GitHub Pages 保留作為另一個部署來源。
+
 Vercel 部署、文件保存位置、容量與登入權限說明見 [Vercel 部署說明](VERCEL_DEPLOYMENT.md)。
 
 ## 登入與跨裝置同步
