@@ -1,0 +1,57 @@
+// Explicit opt-in integration check against the deployed site and real Supabase.
+// Use dedicated, email-confirmed test accounts; never production user accounts.
+import assert from 'node:assert/strict';
+import {chromium} from '@playwright/test';
+import {createHash} from 'node:crypto';
+import ExcelJS from 'exceljs';
+const names=['AUTOREPORT_TEST_EMAIL','AUTOREPORT_TEST_PASSWORD','AUTOREPORT_TEST_EMAIL_B','AUTOREPORT_TEST_PASSWORD_B'];
+if(names.some(name=>!process.env[name])){console.error('Missing secure test-account settings: '+names.filter(name=>!process.env[name]).join(', '));process.exit(2);}
+const site=(process.env.LIVE_SITE_URL||'https://meng049-cmd.github.io/AutoReport/').replace(/\/?$/,'/');
+const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox'],...(process.env.HTTPS_PROXY?{proxy:{server:process.env.HTTPS_PROXY,bypass:'localhost,127.0.0.1'}}:{})});
+async function login(page,email,password){
+ await page.goto(site);await page.locator('.cloud-sync summary').click();
+ await page.evaluate(({email,password})=>{const form=document.querySelector('.cloud-login');form.elements.email.value=email;form.elements.password.value=password;form.requestSubmit();},{email,password});
+ await page.waitForFunction(()=>!document.querySelector('.cloud-actions').hidden,{},{timeout:30000});
+ await page.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('雲端版本'),{},{timeout:30000});
+}
+async function remote(page,action,arg){return page.evaluate(async({action,arg,site})=>{
+ const {CloudClient,capture,encode}=await import(new URL('cloud/cloud-sync.mjs',site).href),{default:config}=await import(new URL('cloud/cloud-config.js',site).href);
+ const client=new CloudClient(config);await client.resume();
+ if(action==='head')return client.head();
+ if(action==='snapshot')return encode(await capture('autoreport'));
+ if(action==='foreign'){
+  const response=await fetch(config.url+'/storage/v1/object/authenticated/autoreport-sync/'+arg,{headers:{apikey:config.publishableKey,Authorization:'Bearer '+await client.access()}});
+  return {status:response.status,body:response.ok?await response.text():null};
+ }
+}, {action,arg,site});}
+const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+try{
+ const contexts=await Promise.all([browser.newContext({acceptDownloads:true}),browser.newContext({acceptDownloads:true}),browser.newContext({acceptDownloads:true})]);
+ const [first,second,other]=await Promise.all(contexts.map(context=>context.newPage()));
+ for(const page of [first,second,other])page.on('dialog',dialog=>dialog.accept());
+ await login(first,process.env.AUTOREPORT_TEST_EMAIL,process.env.AUTOREPORT_TEST_PASSWORD);
+ await login(second,process.env.AUTOREPORT_TEST_EMAIL,process.env.AUTOREPORT_TEST_PASSWORD);
+ await login(other,process.env.AUTOREPORT_TEST_EMAIL_B,process.env.AUTOREPORT_TEST_PASSWORD_B);
+ for(const page of [first,other])assert.equal((await remote(page,'head')).revision,0,'Use new dedicated test accounts with no cloud backups.');
+ console.log('PASS: two confirmed accounts log in, separate device sessions established.');
+ const book=new ExcelJS.Workbook();for(const name of ['工單（A16）','CY26','工單（CY24&25）','重工工單1','NPI'])book.addWorksheet(name).addRows([['機種','IC','料號','工單'],['CloudSyncTestModel','Goodix','CLOUD-TEST-PART','CLOUD-SYNC-ORDER']]);
+ await first.evaluate(()=>{location.hash='#/database';window.dispatchEvent(new HashChangeEvent('hashchange'));});
+ await first.locator('#databaseFile').setInputFiles({name:'cloud-sync-synthetic.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await book.xlsx.writeBuffer())});
+ await first.locator('#databaseUpload').click();await first.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('已儲存在本瀏覽器'),{},{timeout:120000});
+ await first.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});
+ await first.locator('#file').setInputFiles({name:'cloud-query.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nCLOUD-SYNC-ORDER\n')});await first.locator('#match').click();await first.waitForFunction(()=>document.querySelector('#message').textContent.startsWith('完成'),{},{timeout:60000});
+ const before=await remote(first,'snapshot');
+ await first.locator('[data-action=upload]').click();await first.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('上傳完成'),{},{timeout:60000});
+ const head=await remote(first,'head');assert.equal(head.revision,1);
+ console.log('PASS: real Excel import, CSV matching, private Supabase snapshot upload.');
+ await second.locator('[data-action=upload]').click();await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('另一台裝置已更新'),{},{timeout:60000});assert.equal((await remote(first,'head')).revision,1);
+ console.log('PASS: stale device upload rejected without replacing cloud version.');
+ const backup=second.waitForEvent('download');await second.locator('[data-action=restore]').click();await backup;await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('資料已還原'),{},{timeout:60000});
+ assert.equal(hash(await remote(second,'snapshot')),hash(before),'Restored SQLite, file bytes and metadata must match the original snapshot.');await second.reload();
+ await second.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});await second.locator('#query').fill('CLOUD-SYNC-ORDER');await second.locator('#lookup').click();await second.locator('#searchResults').getByText('唯一匹配').waitFor();
+ console.log('PASS: second device restores identical SQLite/files and can query the imported work order.');
+ assert.equal((await remote(other,'head')).revision,0);const denied=await remote(other,'foreign',head.object_path);assert.ok(denied.status>=400,'Other account must not download the snapshot.');assert.equal(denied.body,null);
+ console.log('PASS: account B cannot list account A workspace or download account A private snapshot.');
+ await first.locator('[data-action=logout]').click();await first.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('已登出'));
+ console.log('PASS: logout. Synthetic test backup retained in dedicated test account; no user data touched.');
+} catch(error){console.error('LIVE CHECK FAILED: '+error.message);process.exitCode=1;} finally{await browser.close();}

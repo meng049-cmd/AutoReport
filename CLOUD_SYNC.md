@@ -63,3 +63,13 @@ npm test
 3. 帳號 B 的版本清單不應含 A 的資料；以 B 的 JWT 要求 A 的 Storage 路徑應失敗，以匿名 publishable key 讀取資料表或私人檔案也應失敗。
 4. 確認資源名稱為 AutoReport 專用，且登出／重新開啟分頁後的登入狀態與畫面正確。
 5. 驗證信箱確認信、失效登入及網路中斷錯誤提示。確認既有 RLS policy 沒有額外授權其他使用者讀取。
+
+## 發布後的真實同步驗證
+
+建立兩個專用、已確認信箱且沒有雲端備份的測試帳號。在環境設定安全提供 AUTOREPORT_TEST_EMAIL、AUTOREPORT_TEST_PASSWORD、AUTOREPORT_TEST_EMAIL_B、AUTOREPORT_TEST_PASSWORD_B，勿將密碼寫進程式或聊天。允許正式網站網域及專案 Supabase 網域。
+
+```sh
+node cloud/cloud-sync.live.mjs
+```
+
+這個明確啟動的檢查會在正式網站使用三個獨立瀏覽器工作階段：真實登入、匯入合成 Excel、比對合成 CSV、上傳、拒絕舊版本覆寫、第二台裝置還原後查詢，以及第二帳號不能讀取第一帳號檔案。僅使用測試帳號，測試備份保留供檢查。不會建立帳號、寄信或清除既有雲端資料；若測試帳號已有備份會停止。缺少測試帳號設定時以非零狀態停止，不宣稱同步已通過。
