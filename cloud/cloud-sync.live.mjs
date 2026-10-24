@@ -22,6 +22,7 @@ async function remote(page,action,arg){return page.evaluate(async({action,arg,si
  if(action==='snapshot')return encode(await capture('autoreport'));
  if(action==='cloud-snapshot')return encode(await client.download());
  if(action==='stale'){client.revision=arg;try{await client.upload(await capture('autoreport'));return 'unexpected-success';}catch(error){return error.message;}}
+ if(action==='foreign-workspace')return client.request('/rest/v1/autoreport_workspaces?user_id=eq.'+encodeURIComponent(arg)+'&select=revision',{token:await client.access()});
  if(action==='foreign'){
   const response=await fetch(config.url+'/storage/v1/object/authenticated/autoreport-sync/'+arg,{headers:{apikey:config.publishableKey,Authorization:'Bearer '+await client.access()}});
   return {status:response.status,body:response.ok?await response.text():null};
@@ -61,7 +62,7 @@ try{
  console.log('PASS: second device restores identical SQLite/files, queries the imported part and uniquely matches a fresh CSV.');
  if(process.env.AUTOREPORT_SKIP_ACCOUNT_B==='1'){console.log('NOT RUN: cross-account isolation is outside this single-account run.');} else {
  await login(other,process.env.AUTOREPORT_TEST_EMAIL_B,process.env.AUTOREPORT_TEST_PASSWORD_B);
- assert.equal((await remote(other,'head')).revision,0);const denied=await remote(other,'foreign',head.object_path);assert.ok(denied.status>=400,'Other account must not download the snapshot.');assert.equal(denied.body,null);
+ const otherHead=await remote(other,'head');assert.notEqual(otherHead.object_path,head.object_path,'B may have its own backup but must not receive A snapshot pointer');assert.deepEqual(await remote(other,'foreign-workspace',head.object_path.split('/')[0]),[],'explicit A workspace query must return no rows to B');const denied=await remote(other,'foreign',head.object_path);assert.ok(denied.status>=400,'Other account must not download the snapshot.');assert.equal(denied.body,null);
  console.log('PASS: account B cannot list account A workspace or download account A private snapshot.');
  }
  await first.locator('[data-action=logout]').click();await first.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('已登出'));
