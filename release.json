@@ -1,7 +1,7 @@
 {
-  "buildId": "d2e49c03292a",
-  "sourceCommit": "7dc4a526c08db1b269e711cd4231feff6b04076b",
+  "buildId": "e31297d81830",
+  "sourceCommit": "1710409566a8ce6815210ecc6ef3c871a2718c35",
   "requireLoginForAnalysis": true,
   "supabaseHost": "dtrusgylbpulpycjwhrt.supabase.co",
-  "builtAt": "2026-10-24T16:01:21.715Z"
+  "builtAt": "2026-10-24T16:06:19.386Z"
 }
