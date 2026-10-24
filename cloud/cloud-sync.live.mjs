@@ -38,12 +38,12 @@ try{
  if(!resume)assert.equal((await remote(first,'head')).revision,0,'Use new dedicated test accounts with no cloud backups.');
  console.log('PASS: account A logs in on two independent device sessions.');
  if(!resume){
- const book=new ExcelJS.Workbook();for(const name of ['工單（A16）','CY26','工單（CY24&25）','重工工單1','NPI'])book.addWorksheet(name).addRows([['機種','IC','料號','工單'],['CloudSyncTestModel','Goodix','CLOUD-TEST-PART','CLOUD-SYNC-ORDER']]);
+ const book=new ExcelJS.Workbook();for(const name of ['工單（A16）','CY26','工單（CY24&25）','重工工單1','NPI'])book.addWorksheet(name).addRows([['機種','IC','料號','工單'],['CloudSyncTestModel','Goodix','CLOUD-TEST-PART','CLOUDSYNC123']]);
  await first.evaluate(()=>{location.hash='#/database';window.dispatchEvent(new HashChangeEvent('hashchange'));});
  await first.locator('#databaseFile').setInputFiles({name:'cloud-sync-synthetic.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await book.xlsx.writeBuffer())});
  await first.locator('#databaseUpload').click();await first.waitForFunction(()=>document.querySelector('#databaseStatus').textContent.includes('已儲存在本瀏覽器'),{},{timeout:120000});
  await first.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});
- await first.locator('#file').setInputFiles({name:'cloud-query.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nCLOUD-SYNC-ORDER\n')});await first.locator('#match').click();await first.waitForFunction(()=>document.querySelector('#message').textContent.startsWith('完成'),{},{timeout:60000});
+ await first.locator('#file').setInputFiles({name:'cloud-query.csv',mimeType:'text/csv',buffer:Buffer.from('工單號碼\nCLOUDSYNC123\n')});await first.locator('#match').click();await first.waitForFunction(()=>document.querySelector('#message').textContent.startsWith('完成'),{},{timeout:60000});
  before=await remote(first,'snapshot');
  await first.locator('[data-action=upload]').click();await first.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('上傳完成'),{},{timeout:60000});
  head=await remote(first,'head');assert.equal(head.revision,1);
@@ -55,8 +55,9 @@ try{
  console.log('PASS: stale device upload rejected without replacing cloud version.');
  const backup=second.waitForEvent('download');await second.locator('[data-action=restore]').click();await backup;await second.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('資料已還原'),{},{timeout:60000});
  assert.equal(hash(await remote(second,'snapshot')),hash(before),'Restored SQLite, file bytes and metadata must match the original snapshot.');await second.reload();
- await second.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});await second.locator('#query').fill('CLOUD-SYNC-ORDER');await second.locator('#lookup').click();await second.locator('#searchResults').getByText('唯一匹配').waitFor();
- console.log('PASS: second device restores identical SQLite/files and can query the imported work order.');
+ await second.evaluate(()=>{location.hash='#matching';window.dispatchEvent(new HashChangeEvent('hashchange'));});await second.locator('#query').fill(resume?'CLOUD-TEST-PART':'CLOUDSYNC123');await second.locator('#lookup').click();await second.locator('#searchResults').getByText('唯一匹配').waitFor();
+ await second.locator('#file').setInputFiles({name:'restored-check.csv',mimeType:'text/csv',buffer:Buffer.from('產品料號\nCLOUD-TEST-PART\n')});await second.locator('#match').click();await second.waitForFunction(()=>document.querySelector('#message').textContent.includes('唯一匹配 1 筆'),{},{timeout:60000});
+ console.log('PASS: second device restores identical SQLite/files, queries the imported part and uniquely matches a fresh CSV.');
  if(process.env.AUTOREPORT_SKIP_ACCOUNT_B==='1'){console.log('NOT RUN: account B isolation requires corrected test credentials.');process.exitCode=2;} else {
  await login(other,process.env.AUTOREPORT_TEST_EMAIL_B,process.env.AUTOREPORT_TEST_PASSWORD_B);
  assert.equal((await remote(other,'head')).revision,0);const denied=await remote(other,'foreign',head.object_path);assert.ok(denied.status>=400,'Other account must not download the snapshot.');assert.equal(denied.body,null);
