@@ -79,3 +79,11 @@ node cloud/cloud-sync.live.mjs
 若舊版本衝突 RPC 發生逾時，請在 SQL Editor 執行 supabase/fix-conflict-response.sql，讓原子版本衝突明確回傳 HTTP 409。新版客戶端也會先檢查版本並限制請求等待時間；這些保護不能取代伺服器的原子版本檢查。
 
 只保留一個帳號時，可使用 `AUTOREPORT_RESUME_ACCOUNT_A=auto AUTOREPORT_SKIP_ACCOUNT_B=1 node cloud/cloud-sync.live.mjs`。此模式只要求 A 的兩個設定值，若已存在備份則僅讀取驗證，不覆寫雲端資料；跨帳號隔離明確標記未執行。
+
+## 公開註冊與分析入口
+
+目前 `cloud/cloud-config.js` 已啟用 `requireLoginForAnalysis`。未登入不載入分析模組；登入後向 Supabase 驗證使用者與信箱確認狀態，成功才開放分析。登出、到期或 HTTP 401 會鎖定。這是靜態網站的正常操作入口限制；實際雲端資料權限仍由 Supabase JWT、RLS 與私人 bucket 強制執行，不能把公開 JavaScript 當成私有程式或受保護的後端運算。
+
+新的主機網址必須加入 Supabase 的允許重新導向網址，並以可用的 SMTP 測試註冊確認信。沒有驗證過信箱的帳號不能開啟分析。公開頁面或公開註冊不代表使用者可以讀取別人的文件。
+
+本機資料不能因為切換帳號就匯出給新帳號。原帳號可在登入時按「下載本機備份」保存未同步資料；新帳號若選擇切換，只會經確認清除舊副本，不會取得舊檔案。瀏覽器 IndexedDB 本身不是加密的多使用者作業系統隔離；共用裝置仍應在離開前備份並清理網站資料。

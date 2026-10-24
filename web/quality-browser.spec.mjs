@@ -1,3 +1,4 @@
+import {authenticatedAnalysis} from './auth-test-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from '@playwright/test';
@@ -11,13 +12,13 @@ test('formula notes collapse, date/process/defect/product drilldown retains coho
  const root=path.resolve('dist'),server=createServer(async(req,res)=>{
   const pathname=new URL(req.url,'http://localhost').pathname,file=path.resolve(root,pathname==='/'?'index.html':decodeURIComponent(pathname).slice(1));
   if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}
-  try{res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.wasm')?'application/wasm':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
+  try{res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.wasm')?'application/wasm':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  let browser;
  try{
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
-  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];await authenticatedAnalysis(page.context());page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/#yield`);await page.waitForFunction(()=>!document.querySelector('#match').disabled);
   const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Detail');sheet.addRow(['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種']);
   for(const [serial,process,day,status,defect,ic] of [['a','DAF外觀',12,'GOOD','','A'],['a','功能一測試',12,'FAIL','dust','A'],['b','DAF外觀',12,'GOOD','','A'],['c','功能一測試',12,'GOOD','','A'],['a','DAF外觀',14,'GOOD','','A'],['d','DAF外觀',14,'FAIL','crack','B'],['only-aoi','正面AOI',12,'FAIL','excluded','B'],['only-other','其他製程',12,'FAIL','excluded-other','B']])sheet.addRow([process,'WO','part','name',serial,new Date(`2026-10-${day}T00:00:00Z`),'op',defect,status,ic,'Model']);

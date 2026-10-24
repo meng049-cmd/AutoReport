@@ -10,7 +10,7 @@ for(const name of names.filter(name=>name.includes('EMAIL'))){if(!/^[^\s@]+@[^\s
 const site=(process.env.LIVE_SITE_URL||'https://meng049-cmd.github.io/AutoReport/').replace(/\/?$/,'/');
 const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox'],...(process.env.HTTPS_PROXY?{proxy:{server:process.env.HTTPS_PROXY,bypass:'localhost,127.0.0.1'}}:{})});
 async function login(page,email,password){
- await page.goto(site);await page.locator('.cloud-sync summary').click();
+ await page.goto(site);await page.locator('.cloud-sync').evaluate(element=>element.open=true);
  await page.evaluate(({email,password})=>{const form=document.querySelector('.cloud-login');form.elements.email.value=email;form.elements.password.value=password;form.requestSubmit();},{email,password});
  try {await page.waitForFunction(()=>!document.querySelector('.cloud-actions').hidden,{},{timeout:30000});} catch {const state=await page.evaluate(()=>({status:document.querySelector('.cloud-status')?.textContent,valid:document.querySelector('.cloud-login')?.checkValidity(),emailValid:document.querySelector('.cloud-login [name=email]')?.validity.valid,passwordValid:document.querySelector('.cloud-login [name=password]')?.validity.valid}));throw Error('Login did not complete: '+JSON.stringify(state));}
  await page.waitForFunction(()=>document.querySelector('.cloud-status').textContent.includes('雲端版本'),{},{timeout:30000});

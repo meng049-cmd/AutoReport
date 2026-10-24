@@ -1,3 +1,4 @@
+import {authenticatedAnalysis} from './auth-test-context.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from '@playwright/test';
@@ -15,12 +16,12 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   const requestPath=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
   const file=path.resolve(root,requestPath.replace(/^\/AutoReport\//,'').replace(/^$/,'index.html'));
   if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}
-  try{res.setHeader('Content-Type',file.endsWith('.wasm')?'application/wasm':file.endsWith('.js')?'text/javascript':file.endsWith('.json')?'application/json':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
+  try{res.setHeader('Content-Type',file.endsWith('.wasm')?'application/wasm':/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.json')?'application/json':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
  try{
-  const page=await browser.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('request',r=>requests.push([r.method(),r.url()]));page.on('pageerror',e=>errors.push(e.message));
+  const page=await browser.newPage();await authenticatedAnalysis(page.context());page.setDefaultTimeout(30000);const errors=[];page.on('request',r=>requests.push([r.method(),r.url()]));page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{
    window.yieldWorkerStarts=0;const NativeWorker=Worker;window.Worker=class extends NativeWorker{constructor(url,options){super(url,options);if(String(url).includes('yield-worker.js'))window.yieldWorkerStarts++;}};window.exportRequests=0;const send=Worker.prototype.postMessage;
    Worker.prototype.postMessage=function(message,...args){if(message.type==='export')window.exportRequests++;return send.call(this,message,...args);};
@@ -246,7 +247,7 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   await page.locator('#libraryRemove').click();await page.waitForFunction(()=>document.querySelectorAll('#fileLibraryTable tbody tr').length===0);await showView(page,'#/files');await page.locator('#librarySearch').fill('raw-archive_IC機種');assert.equal(await page.locator('#fileLibraryTable tbody tr').count(),4,'deleting originals preserves both sets of completed outputs');
   await showView(page,'#/raw');await page.locator('#librarySearch').fill('raw-error.xlsx');assert.equal(await page.locator('#fileLibraryTable tbody tr').count(),1,'failed matching retains the raw file for troubleshooting');await page.locator('#fileLibraryTable tbody input').check();await page.locator('#libraryClearSelection').click();assert.equal(await page.locator('#fileLibraryTable tbody input:checked').count(),0);
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:1280,height:900});await page.screenshot({path:'/tmp/autoreport-raw-library.png',fullPage:true});
-  assert.deepEqual(errors,[]);assert.ok(requests.every(([method,url])=>method==='GET'&&!url.includes('/api/')));
+  assert.deepEqual(errors,[]);assert.ok(requests.every(([method,url])=>(method==='GET'||(method==='POST'&&url.includes('/auth/v1/token')))&&!url.includes('/api/')));
   console.log('Browser verified all requests are GET; upload files never leave browser.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 });

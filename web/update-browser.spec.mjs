@@ -1,3 +1,4 @@
+import {authenticatedAnalysis} from './auth-test-context.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from '@playwright/test';
@@ -16,13 +17,13 @@ test('updated reference database works in the browser and preserves Detail downl
  const server=createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');const file=path.resolve(root,url.pathname==='/'?'index.html':url.pathname.slice(1));
   if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}
-  try{res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.json')?'application/json':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
+  try{res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.json')?'application/json':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  let browser;
  try{
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
-  const page=await browser.newPage();let listUnavailable=false;
+  const page=await browser.newPage();await authenticatedAnalysis(page.context());let listUnavailable=false;
   await page.route('https://api.github.com/**',route=>listUnavailable?route.fulfill({status:403,body:'rate limit'}):route.fulfill({json:{truncated:false,tree:[{type:'blob',path:'database-inputs/原始對照.xlsx',size:1024},{type:'blob',path:'database-inputs/README.md',size:300}]}}));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(()=>!document.querySelector('#match').disabled);

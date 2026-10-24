@@ -7,11 +7,30 @@
   "headers": [
     {
       "source": "/cloud/:path*",
-      "headers": [{"key": "Cache-Control", "value": "no-cache"}]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
     },
     {
       "source": "/(.*)",
-      "headers": [{"key": "X-Content-Type-Options", "value": "nosniff"}]
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    },
+    {
+      "source": "/release.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
     }
   ]
 }

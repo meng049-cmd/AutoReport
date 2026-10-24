@@ -24,4 +24,20 @@
 
 Supabase Auth 的使用者是網站帳號，不是電腦登入帳號，也不是 Supabase 管理後台帳號。JWT 與 RLS 限制每位使用者只能讀寫自己的私人資料；不會取得管理整個資料庫或存取電腦其他資料夾的權限。選擇文件仍需使用者透過瀏覽器的選檔操作。
 
-先前已驗證登入、跨裝置還原、衝突與 A/B 隔離；這些測試針對雲端保存權限。原版分析介面可匿名使用，不能把雲端登入測試當成已驗證整站「未登入不得分析」。若要此限制，需要明確實作與驗證分析入口的登入要求。靜態前端隱藏或停用分析入口屬於操作限制，不能讓公開 JavaScript 變成私有程式；需要強制服務端執行權限時，須將相關 API／運算移到受 JWT 保護的後端。
+先前已驗證登入、跨裝置還原、衝突與 A/B 隔離；這些測試針對雲端保存權限。目前已要求登入後才能使用分析。頁面初始隱藏且停用分析區，不載入分析程式；密碼登入／恢復工作階段後會向 Supabase `/auth/v1/user` 確認使用者已驗證信箱，才啟動分析。登出、HTTP 401 或登入到期會重新鎖定。不同帳號使用同一瀏覽器時，必須由原帳號先另存本機備份，再明確確認清除前一帳號副本，才可啟用新帳號的分析與同步；不會自動將舊檔上傳到新帳號。靜態前端隱藏或停用分析入口屬於操作限制，不能讓公開 JavaScript 變成私有程式；需要強制服務端執行權限時，須將相關 API／運算移到受 JWT 保護的後端。
+
+## 本次公開註冊站點
+
+使用者提供的網址為 `https://auto-report-fa7j2zj07-project1-dc31.vercel.app/`。在 Supabase URL Configuration 加入這個完整網址，並確認正式 Site URL；若這是單次部署網址，應以 Vercel 專案 Domains 中的穩定正式網址取代，後續不要依賴舊的部署網址。Supabase 公開設定已確認 `disable_signup=false`、`mailer_autoconfirm=false`，表示可註冊且要求信箱確認；實際郵件送達仍須透過正式 SMTP 與可收信帳號驗證。
+
+開發環境讀取該 Vercel 網域所需的網路允許項目已存入環境草稿，尚須使用者套用。沒有 Vercel API 授權或 Git Production Branch 設定時，無法由本機保證該網址已部署最新分支；在 Vercel 設定 `codex/autoreport-cloud-sync` 為來源／正式分支後 Redeploy，或另經授權合併 main。
+
+本機資料不能因為切換帳號就匯出給新帳號。原帳號可在登入時按「下載本機備份」保存未同步資料；新帳號若選擇切換，只會經確認清除舊副本，不會取得舊檔案。瀏覽器 IndexedDB 本身不是加密的多使用者作業系統隔離；共用裝置仍應在離開前備份並清理網站資料。
+
+## 本次部署查核發現的阻擋
+
+目前以無效診斷驗證碼檢查重新導向，GitHub Pages 與提供的 Vercel 網址都被導回 `http://localhost:3000`。這表示正式 URL 設定尚未驗證完成；公開註冊不能只以既有測試帳號登入成功當作已就緒。需在 Supabase Authentication → URL Configuration 設定正式 Site URL 與允許的 Redirect URLs，再測試確認信。
+
+每次建置會產生 `/release.json`，可比對 `buildId`、`sourceCommit`、`requireLoginForAnalysis` 與 `supabaseHost`，以驗證 GitHub Pages 與 Vercel 是否部署相同來源。該檔不含密碼或機密金鑰。
+
+既有 `web/browser.spec.mjs` 的完整報表流程有已知基線失敗：其工作表順序與階段製程等舊規格不符現行報表。此變更只為該測試補上登入情境與正確 JavaScript MIME，不刪除舊斷言，也不將全套瀏覽器測試宣稱為已通過。登入專項、同步測試、分析單元測試與本機資料庫瀏覽器測試已另行驗證。
