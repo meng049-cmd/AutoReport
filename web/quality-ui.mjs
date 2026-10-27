@@ -1,3 +1,4 @@
+import {productStageSeries} from './stage-product-series.mjs';
 import {restrictChartAnalysis} from './stage-metrics.mjs';
 import {navigate} from './navigation.mjs';
 import {renderQualityExtras} from './quality-extras.mjs';
@@ -16,13 +17,14 @@ const stageGridTemplate=document.querySelector('.yield-charts .stage-grid');
 const stageGroupsHost=document.createElement('div');stageGroupsHost.id='stageModelGroups';stageGridTemplate.replaceWith(stageGroupsHost);
 function setupStageGroups(){
  stageGroupsHost.replaceChildren();stages=[];
- const models=[...new Set(analysis.products.map(p=>p.model||'【待補機種】'))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
- for(const [index,model] of models.entries()){
+ const models=[...analysis.products].sort((a,b)=>(a.model+' '+a.ic).localeCompare(b.model+' '+b.ic,'zh-Hant'));
+ for(const [index,product] of models.entries()){
+  const model=(product.model||'【待補機種】')+'-'+(product.ic||'【待補IC】');
   const section=document.createElement('section');section.className='stage-model-group';section.dataset.model=model;
-  const heading=document.createElement('h3');heading.textContent='機種：'+model;
-  const note=document.createElement('p');note.className='muted';note.textContent='機種 → 前段／後段 → 日期 → 製程 → IC／產品 → 不良項目。投入與良率僅計本機種，日期保留完整分析期間。';
+  const heading=document.createElement('h3');heading.textContent='產品：'+model;
+  const note=document.createElement('p');note.className='muted';note.textContent='IC＋機種 → 前段／後段 → 日期 → 製程 → 不良項目。左側先列最近兩週，再列每日。週別依ISO週一至週日；僅統計本次資料範圍，資料不完整的週僅含已匯入紀錄，無資料留白。';
   const grid=stageGridTemplate.cloneNode(true);
-  for(const definition of stageDefinitions){const stage={...definition,key:'model-'+index+'-'+definition.key,stageName:definition.key,model,title:model+' · '+definition.title};stages.push(stage);for(const prefix of ['stage-','summary-','download-'])grid.querySelector('#'+prefix+definition.key).id=prefix+stage.key;grid.querySelector('#stage-'+stage.key).closest('article').querySelector('h3').textContent=definition.title;grid.querySelector('#download-'+stage.key).onclick=()=>downloadStageExcel(stage);}
+  for(const definition of stageDefinitions){const stage={...definition,key:'model-'+index+'-'+definition.key,stageName:definition.key,productId:product.id,model,title:model+' · '+definition.title};stages.push(stage);for(const prefix of ['stage-','summary-','download-'])grid.querySelector('#'+prefix+definition.key).id=prefix+stage.key;grid.querySelector('#stage-'+stage.key).closest('article').querySelector('h3').textContent=definition.title;grid.querySelector('#download-'+stage.key).onclick=()=>downloadStageExcel(stage);}
   section.append(heading,note,grid);stageGroupsHost.append(section);
  }
 }
@@ -30,8 +32,8 @@ const dateRange=()=>calendarDates(filters.startDate||periodStart,filters.endDate
 const baseFilters=()=>({startDate:filters.startDate,endDate:filters.endDate,granularity:filters.granularity||'day',stage:filters.stage});
 const productLabel=id=>{const p=analysis.products.find(p=>p.id===id);return p?p.ic+'／'+p.model:id;};
 const scopeLabel=(scope=filters)=>[scope.product?productLabel(scope.product):'全部產品',scope.startDate+' — '+scope.endDate,scope.date?periodLabel(scope.date,scope.granularity):null,scope.order,scope.process,defectFilterLabel(scope.defect)].filter(Boolean).join(' → ');
-function stageModel(key){if(!stageModels.has(key)){const stage=stages.find(item=>item.key===key),products=analysis.products.filter(p=>(p.model||'【待補機種】')===stage.model),ids=new Set(products.map(p=>p.id)),scoped={...analysis,products,observations:analysis.observations.filter(row=>ids.has(row.product))};stageModels.set(key,buildStageAnalysis(scoped,stage.stageName,periodStart,periodEnd,[]));}return stageModels.get(key);}
-function daily(stage){return stageModel(stage).daily;}
+function stageModel(key){if(!stageModels.has(key)){const stage=stages.find(item=>item.key===key);stageModels.set(key,productStageSeries(analysis,stage.productId,stage.stageName,periodStart,periodEnd));}return stageModels.get(key);}
+function daily(stage){return stageModel(stage).chartRows;}
 function stageInputCounts(stage,rows){return rows.map(row=>row.input);}
 function metrics(id,values){$(id).replaceChildren(...values.map(([label,value])=>{const div=document.createElement('div');div.className='metric';const strong=document.createElement('strong');strong.textContent=value;const span=document.createElement('span');span.textContent=label;div.append(strong,span);return div;}));}
 function snapshotOptions(canvas,scope=filters){return {snapshot:canvas.toDataURL('image/png'),imageWidth:canvas.width/(window.devicePixelRatio||1),imageHeight:canvas.height/(window.devicePixelRatio||1),sources:analysis.sources||[],referenceSources:analysis.referenceSources||[],scope:scopeLabel(scope),notes:[['略過錯誤列',String(analysis.skippedRows?.length||0)+' 列；未納入投入與良率。詳見原分析報表略過錯誤明細。']]};}
@@ -43,26 +45,28 @@ function drawStageChart(stage){
  const measured=rows.filter(r=>r.value!=null).map(r=>r.value),min=measured.length&&Math.min(...measured)<=.95?Math.max(0,Math.floor(Math.min(...measured)*20)/20-.05):.95,max=1.005,step=min<.4?.1:min<.9?.05:.01,top=48,bottom=46,plotW=width-left-right,plotH=height-top-bottom,slot=plotW/(rows.length||1),barW=Math.min(28,Math.max(4,slot*.5)),ty=top+(max-stage.target)/(max-min)*plotH;
  ctx.font='11px system-ui';ctx.textAlign='right';
  for(let value=min;value<=1.00001;value+=step){const y=top+(max-value)/(max-min)*plotH;ctx.strokeStyle='#e6ebf0';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(width-right,y);ctx.stroke();ctx.fillStyle='#788898';ctx.fillText((value*100).toFixed(0)+'%',left-8,y+4);}
- rows.forEach((r,i)=>{const x=left+slot*(i+.5);if(r.value!=null){const y=Math.max(top,Math.min(top+plotH,top+(max-r.value)/(max-min)*plotH));ctx.fillStyle=stage.color;ctx.fillRect(x-barW/2,y,barW,top+plotH-y);ctx.fillStyle='#263748';ctx.font='600 10px system-ui';ctx.textAlign='center';let labelY=Math.max(top-5,y-7);if(Math.abs(labelY-ty)<13)labelY=ty-15;ctx.fillText(pct(r.value),x,labelY);}ctx.fillStyle='#687b8c';ctx.font='11px system-ui';ctx.textAlign='center';ctx.fillText(r.date.slice(5),x,height-24);ctx.font='9px system-ui';ctx.fillText('投入 '+inputs[i],x,height-7);});
+ rows.forEach((r,i)=>{const x=left+slot*(i+.5);if(r.value!=null){const y=Math.max(top,Math.min(top+plotH,top+(max-r.value)/(max-min)*plotH));ctx.fillStyle=r.kind==='week'?'#117b83':stage.color;ctx.fillRect(x-barW/2,y,barW,top+plotH-y);ctx.fillStyle='#263748';ctx.font='600 10px system-ui';ctx.textAlign='center';let labelY=Math.max(top-5,y-7);if(Math.abs(labelY-ty)<13)labelY=ty-15;ctx.fillText(pct(r.value),x,labelY);}ctx.fillStyle='#687b8c';ctx.font='11px system-ui';ctx.textAlign='center';ctx.fillText(r.label||r.date.slice(5),x,height-24);ctx.font='9px system-ui';ctx.fillText('投入 '+inputs[i],x,height-7);});
  // Draw the target after bars so it is continuous, and reserve its label above the plot.
  ctx.strokeStyle='#396ed4';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(left,ty);ctx.lineTo(width-right,ty);ctx.stroke();ctx.fillStyle='#396ed4';ctx.textAlign='right';ctx.font='600 11px system-ui';ctx.fillText('目標 '+pct(stage.target),width-right,32);
  ctx.fillStyle='#263748';ctx.textAlign='left';ctx.font='700 13px system-ui';ctx.fillText(stage.title+' 每日階段製程平均良率',left,17);
  const show=index=>{const row=rows[index];if(!row)return;const text=`${stage.title} · ${row.date} · ${pct(row.value)} · 投入 ${inputs[index]} PPID`;canvas.title=text;};
- const hit=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length&&rows[index].value!=null){show(index);openStageDrill(stage,rows[index].date);}};canvas.onmousemove=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length)show(index);};canvas.onclick=hit;canvas.tabIndex=0;canvas.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();const row=rows[Number(canvas.dataset.activeIndex)||0];if(row?.value!=null)openStageDrill(stage,row.date);return;}if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();canvas.dataset.activeIndex=String(Math.max(0,Math.min(rows.length-1,(Number(canvas.dataset.activeIndex)||0)+(e.key==='ArrowRight'?1:-1))));show(Number(canvas.dataset.activeIndex));};
- canvas.dataset.points=rows.length;canvas.setAttribute('aria-label',`${stage.title}每日良率圖；每柱標示投入PPID，點選可依日期、製程、產品、不良項目下鑽。日期範圍 ${periodStart} 至 ${periodEnd}，共 ${rows.length} 天，無資料日保留空檔`);
+ const hit=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length&&rows[index].value!=null){show(index);selectStageRow(stage,rows[index]);}};canvas.onmousemove=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length)show(index);};canvas.onclick=hit;canvas.tabIndex=0;canvas.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();const row=rows[Number(canvas.dataset.activeIndex)||0];if(row?.value!=null)selectStageRow(stage,row);return;}if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();canvas.dataset.activeIndex=String(Math.max(0,Math.min(rows.length-1,(Number(canvas.dataset.activeIndex)||0)+(e.key==='ArrowRight'?1:-1))));show(Number(canvas.dataset.activeIndex));};
+ canvas.dataset.points=rows.length;canvas.setAttribute('aria-label',`${stage.title}每日良率圖；每柱標示投入PPID，點選可依日期、製程、產品、不良項目下鑽。日期範圍 ${periodStart} 至 ${periodEnd}，最近兩週加 ${stageModel(stage.key).daily.length} 天，無資料保留空檔`);
 }
+function selectStageRow(stage,row){if(row.kind==='week'){$('qualitySelection').hidden=false;$('qualitySelection').textContent=stage.title+' · '+row.date+'（'+row.start+' — '+row.end+'，僅含本次匯入範圍） · 製程平均 '+pct(row.value)+' · 週內扣重投入 '+row.input;return;}openStageDrill(stage,row.date);}
 async function downloadStageExcel(stage){
  await withDownloadButton($('download-'+stage.key),async()=>{
-  const model=stageModel(stage.key),initial=stageExports.get(stage.key),options={sources:analysis.sources||[],referenceSources:analysis.referenceSources||[],snapshot:initial?.snapshot||$('stage-'+stage.key).toDataURL('image/png'),imageWidth:initial?.width||$('stage-'+stage.key).width/(window.devicePixelRatio||1),imageHeight:252,scope:periodStart+' — '+periodEnd+' · '+stage.title+'（初始報表）',inputCounts:model.daily.map(row=>row.input),notes:[
+  const model=stageModel(stage.key),initial=stageExports.get(stage.key),options={sources:analysis.sources||[],referenceSources:analysis.referenceSources||[],snapshot:initial?.snapshot||$('stage-'+stage.key).toDataURL('image/png'),imageWidth:initial?.width||$('stage-'+stage.key).width/(window.devicePixelRatio||1),imageHeight:252,scope:periodStart+' — '+periodEnd+' · '+stage.title+'（初始報表）',inputCounts:model.chartRows.map(row=>row.input),notes:[
+   ['週別統計','依ISO週一至週日計算，最近兩週放在每日起日前；只計本次匯入範圍，不把缺少紀錄當作完整週。每週各製程跨日PPID去重後取製程良率平均，不平均每日百分比。'],
    ['略過錯誤列',String(analysis.skippedRows?.length||0)+' 列；未納入投入與良率。'],
-   ['固定資料範圍','每日階段圖、下鑽及此Excel均使用初始分析完整日期與此機種產品，不受上方不良分析篩選影響。'],
+   ['固定資料範圍','每日階段圖、下鑽及此Excel均使用初始分析完整日期與此IC＋機種產品，不受上方不良分析篩選影響。'],
    ['唯一投入驗算','子層投入以各自PPID去重，上層取子層PPID聯集。子層投入合計減重複計入次數等於上層唯一投入；跨日總投入也採聯集。重複計入次數為多算的次數，同一片出現3個子層會扣2次。'],
    ['日期階段良率','主要良率＝AGGREGATE(1,6,同日該階段有資料製程良率)，先合併產品片數計算製程良率，再平均製程。比較良率＝1－同範圍唯一不良PPID／唯一投入PPID；差異＝平均良率－唯一PPID良率，以百分點表示。'],
    ['製程與產品良率','各組以自身唯一PPID計算（投入－不良）／投入。同一製程的產品互斥，可用產品良品數合計÷製程投入回算製程良率。跨製程的日期投入與不良均以聯集去重，用於唯一PPID比較良率；主要日期良率另平均各有資料製程良率。歸屬投入欄另將每片只歸屬一製程供互斥加總驗算，不修改各製程本身的投入與良率。'],
    ['不良項目驗算','每日階段下鑽以當日當製程PPID的不良紀錄分解，FAIL／Scrap優先，每片只列一項；各項共用該產品／製程投入母數。良品加不良項目唯一片數等於投入，1減各項不良率合計等於產品良率。全檔完整不良分析仍採跨日期、跨製程的首次不良歸屬。'],
    ['不良名稱缺漏','保留不良旗標但原始合併檔缺少項目文字時列為「未填不良項目」，不會漏掉該片。'],
-  ],sheets:[{name:'每日投入數',rows:[['日期','投入唯一PPID','唯一良品PPID','唯一不良PPID','採用：製程平均良率','原報表製程平均良率','與原報表一致','唯一PPID良率（比較）','良率差異（百分點）'],...model.daily.map(row=>[row.date,row.input,row.good,row.count,row.value,row.expected,row.consistent,row.uniqueYield,row.difference==null?null:row.difference*100])],percentColumns:[4,5,7]},...stageAuditSheets(model)]};
-  save(await createStageChartWorkbook({...stage,key:stage.stageName},model.daily,options),stage.model.replace(/[\\/:*?"<>|]/g,'_')+'_'+stage.stageName+'_每日階段良率.xlsx');
+  ],sheets:[{name:'週別統計',rows:[['ISO週別','週起日','週迄日','本次分析起日','本次分析迄日','唯一投入','唯一不良','製程平均良率','唯一PPID比較良率'],...model.weeks.map(row=>[row.date,row.start,row.end,periodStart,periodEnd,row.input,row.count,row.value,row.uniqueYield])],percentColumns:[7,8]},{name:'每日投入數',rows:[['日期','投入唯一PPID','唯一良品PPID','唯一不良PPID','採用：製程平均良率','原報表製程平均良率','與原報表一致','唯一PPID良率（比較）','良率差異（百分點）'],...model.daily.map(row=>[row.date,row.input,row.good,row.count,row.value,row.expected,row.consistent,row.uniqueYield,row.difference==null?null:row.difference*100])],percentColumns:[4,5,7]},...stageAuditSheets(model)]};
+  save(await createStageChartWorkbook({...stage,key:stage.stageName},model.chartRows,options),stage.model.replace(/[\\/:*?"<>|]/g,'_')+'_'+stage.stageName+'_每日階段良率.xlsx');
  });
 }
 function openStageDrill(stage,date){stageDrillPaths.set(stage.key,[{dimension:'date',key:date,label:date}]);stageDrillLeaves.delete(stage.key);renderStageDrill(stage);$('qualitySelection').textContent=stage.title+' · '+date+' · 點選製程繼續分析';$('qualitySelection').hidden=false;}
