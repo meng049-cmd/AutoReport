@@ -10,12 +10,27 @@ const $=id=>document.getElementById(id),pct=x=>Number.isFinite(x)?(x*100).toFixe
 let analysis,stageChecks=[],periodStart='',periodEnd='',filters={},detailRows=[],detailPage=0,detailMode='ppid',firstAxis='date',stageModels=new Map(),stageExports=new Map(),stageDrillPaths=new Map(),stageDrillLeaves=new Map();
 let renderedWidth=null,layoutFrame=0;
 const chartPages=new Map(),charts=[],axisOrder=()=>defectDimensions(firstAxis);
-const stages=[{key:'前段',title:'前段（DAF＋FT1）',target:.985,color:'#d54545'},{key:'後段',title:'後段（ASM＋FT2）',target:.99,color:'#d54545'}];
+const stageDefinitions=[{key:'前段',title:'前段（DAF＋FT1）',target:.985,color:'#d54545'},{key:'後段',title:'後段（ASM＋FT2）',target:.99,color:'#d54545'}];
+let stages=[];
+const stageGridTemplate=document.querySelector('.yield-charts .stage-grid');
+const stageGroupsHost=document.createElement('div');stageGroupsHost.id='stageModelGroups';stageGridTemplate.replaceWith(stageGroupsHost);
+function setupStageGroups(){
+ stageGroupsHost.replaceChildren();stages=[];
+ const models=[...new Set(analysis.products.map(p=>p.model||'【待補機種】'))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+ for(const [index,model] of models.entries()){
+  const section=document.createElement('section');section.className='stage-model-group';section.dataset.model=model;
+  const heading=document.createElement('h3');heading.textContent='機種：'+model;
+  const note=document.createElement('p');note.className='muted';note.textContent='機種 → 前段／後段 → 日期 → 製程 → IC／產品 → 不良項目。投入與良率僅計本機種，日期保留完整分析期間。';
+  const grid=stageGridTemplate.cloneNode(true);
+  for(const definition of stageDefinitions){const stage={...definition,key:'model-'+index+'-'+definition.key,stageName:definition.key,model,title:model+' · '+definition.title};stages.push(stage);for(const prefix of ['stage-','summary-','download-'])grid.querySelector('#'+prefix+definition.key).id=prefix+stage.key;grid.querySelector('#stage-'+stage.key).closest('article').querySelector('h3').textContent=definition.title;grid.querySelector('#download-'+stage.key).onclick=()=>downloadStageExcel(stage);}
+  section.append(heading,note,grid);stageGroupsHost.append(section);
+ }
+}
 const dateRange=()=>calendarDates(filters.startDate||periodStart,filters.endDate||periodEnd);
 const baseFilters=()=>({startDate:filters.startDate,endDate:filters.endDate,granularity:filters.granularity||'day',stage:filters.stage});
 const productLabel=id=>{const p=analysis.products.find(p=>p.id===id);return p?p.ic+'／'+p.model:id;};
 const scopeLabel=(scope=filters)=>[scope.product?productLabel(scope.product):'全部產品',scope.startDate+' — '+scope.endDate,scope.date?periodLabel(scope.date,scope.granularity):null,scope.order,scope.process,defectFilterLabel(scope.defect)].filter(Boolean).join(' → ');
-function stageModel(stage){if(!stageModels.has(stage))stageModels.set(stage,buildStageAnalysis(analysis,stage,periodStart,periodEnd,stageChecks));return stageModels.get(stage);}
+function stageModel(key){if(!stageModels.has(key)){const stage=stages.find(item=>item.key===key),products=analysis.products.filter(p=>(p.model||'【待補機種】')===stage.model),ids=new Set(products.map(p=>p.id)),scoped={...analysis,products,observations:analysis.observations.filter(row=>ids.has(row.product))};stageModels.set(key,buildStageAnalysis(scoped,stage.stageName,periodStart,periodEnd,[]));}return stageModels.get(key);}
 function daily(stage){return stageModel(stage).daily;}
 function stageInputCounts(stage,rows){return rows.map(row=>row.input);}
 function metrics(id,values){$(id).replaceChildren(...values.map(([label,value])=>{const div=document.createElement('div');div.className='metric';const strong=document.createElement('strong');strong.textContent=value;const span=document.createElement('span');span.textContent=label;div.append(strong,span);return div;}));}
@@ -38,16 +53,16 @@ function drawStageChart(stage){
 }
 async function downloadStageExcel(stage){
  await withDownloadButton($('download-'+stage.key),async()=>{
-  const model=stageModel(stage.key),initial=stageExports.get(stage.key),options={sources:analysis.sources||[],referenceSources:analysis.referenceSources||[],snapshot:initial?.snapshot||$('stage-'+stage.key).toDataURL('image/png'),imageWidth:initial?.width||$('stage-'+stage.key).width/(window.devicePixelRatio||1),imageHeight:252,scope:periodStart+' — '+periodEnd+' · 全產品 · '+stage.title+'（初始報表）',inputCounts:model.daily.map(row=>row.input),notes:[
+  const model=stageModel(stage.key),initial=stageExports.get(stage.key),options={sources:analysis.sources||[],referenceSources:analysis.referenceSources||[],snapshot:initial?.snapshot||$('stage-'+stage.key).toDataURL('image/png'),imageWidth:initial?.width||$('stage-'+stage.key).width/(window.devicePixelRatio||1),imageHeight:252,scope:periodStart+' — '+periodEnd+' · '+stage.title+'（初始報表）',inputCounts:model.daily.map(row=>row.input),notes:[
    ['略過錯誤列',String(analysis.skippedRows?.length||0)+' 列；未納入投入與良率。'],
-   ['固定資料範圍','每日階段圖、下鑽及此Excel均使用初始分析完整日期與產品，不受上方不良分析篩選影響。'],
+   ['固定資料範圍','每日階段圖、下鑽及此Excel均使用初始分析完整日期與此機種產品，不受上方不良分析篩選影響。'],
    ['唯一投入驗算','子層投入以各自PPID去重，上層取子層PPID聯集。子層投入合計減重複計入次數等於上層唯一投入；跨日總投入也採聯集。重複計入次數為多算的次數，同一片出現3個子層會扣2次。'],
    ['日期階段良率','主要良率＝AGGREGATE(1,6,同日該階段有資料製程良率)，先合併產品片數計算製程良率，再平均製程。比較良率＝1－同範圍唯一不良PPID／唯一投入PPID；差異＝平均良率－唯一PPID良率，以百分點表示。'],
    ['製程與產品良率','各組以自身唯一PPID計算（投入－不良）／投入。同一製程的產品互斥，可用產品良品數合計÷製程投入回算製程良率。跨製程的日期投入與不良均以聯集去重，用於唯一PPID比較良率；主要日期良率另平均各有資料製程良率。歸屬投入欄另將每片只歸屬一製程供互斥加總驗算，不修改各製程本身的投入與良率。'],
    ['不良項目驗算','每日階段下鑽以當日當製程PPID的不良紀錄分解，FAIL／Scrap優先，每片只列一項；各項共用該產品／製程投入母數。良品加不良項目唯一片數等於投入，1減各項不良率合計等於產品良率。全檔完整不良分析仍採跨日期、跨製程的首次不良歸屬。'],
    ['不良名稱缺漏','保留不良旗標但原始合併檔缺少項目文字時列為「未填不良項目」，不會漏掉該片。'],
   ],sheets:[{name:'每日投入數',rows:[['日期','投入唯一PPID','唯一良品PPID','唯一不良PPID','採用：製程平均良率','原報表製程平均良率','與原報表一致','唯一PPID良率（比較）','良率差異（百分點）'],...model.daily.map(row=>[row.date,row.input,row.good,row.count,row.value,row.expected,row.consistent,row.uniqueYield,row.difference==null?null:row.difference*100])],percentColumns:[4,5,7]},...stageAuditSheets(model)]};
-  save(await createStageChartWorkbook(stage,model.daily,options),stage.key+'_每日階段良率.xlsx');
+  save(await createStageChartWorkbook({...stage,key:stage.stageName},model.daily,options),stage.model.replace(/[\\/:*?"<>|]/g,'_')+'_'+stage.stageName+'_每日階段良率.xlsx');
  });
 }
 function openStageDrill(stage,date){stageDrillPaths.set(stage.key,[{dimension:'date',key:date,label:date}]);stageDrillLeaves.delete(stage.key);renderStageDrill(stage);$('qualitySelection').textContent=stage.title+' · '+date+' · 點選製程繼續分析';$('qualitySelection').hidden=false;}
@@ -122,12 +137,12 @@ function resetFilters(){filters=baseFilters();chartPages.clear();$('qualityProdu
 function syncRangeInputs(){const mode=$('defectPeriodMode').value;for(const [id,date] of [['defectStart',filters.startDate],['defectEnd',filters.endDate]]){$(id).type=mode==='month'?'month':'date';$(id).value=mode==='month'?periodKey(date,mode):date;}}
 function applyRange(){const mode=$('defectPeriodMode').value,bounds=value=>mode==='week'?periodBounds(periodKey(value,'week'),'week'):periodBounds(value,mode);let start,end;try{start=bounds($('defectStart').value);end=bounds($('defectEnd').value);}catch{}if(!start||!end||start.start>end.end){$('defectRangeStatus').textContent='請選擇有效的起訖日期';return;}if(calendarDates(start.start,end.end).length>16383){$('defectRangeStatus').textContent='日期範圍超過 Excel 上限';return;}$('defectRangeStatus').textContent='';filters={startDate:start.start,endDate:end.end,granularity:mode,product:filters.product,order:filters.order,stage:filters.stage};chartPages.clear();syncRangeInputs();render();}
 export function clearQuality(){cancelAnimationFrame(layoutFrame);renderedWidth=null;analysis=null;stageChecks=[];filters={};charts.length=0;chartPages.clear();stageModels.clear();stageExports.clear();stageDrillPaths.clear();stageDrillLeaves.clear();periodStart='';periodEnd='';$('qualityReportDownload').hidden=true;$('qualityReportDownload').removeAttribute('href');$('qualityDashboard').hidden=true;$('qualityEmpty').hidden=false;$('qualitySelection').hidden=true;$('defectDetails').close();$('defectLevels').replaceChildren();}
-export function renderQuality(data,start,end,checks=[],reportDownload=null){$('stageComparisonDetails').open=false;const link=$('qualityReportDownload');link.hidden=!reportDownload;if(reportDownload){link.href=reportDownload.url;link.download=reportDownload.filename;}else link.removeAttribute('href');analysis=restrictChartAnalysis(data);firstAxis='date';stageModels.clear();stageExports.clear();stageDrillPaths.clear();stageDrillLeaves.clear();stageChecks=(checks||[]).filter(r=>r.stage!=='SMT');periodStart=start;periodEnd=end;filters={startDate:start,endDate:end,granularity:'day',stage:'指定製程'};chartPages.clear();fillSelect('qualityProduct','全部產品',analysis.products.map(p=>[p.id,p.ic+'／'+p.model]),'');$('qualityDashboard').hidden=false;$('qualityEmpty').hidden=true;navigate('quality');$('qualitySelection').hidden=true;$('defectStatus').hidden=true;$('defectPeriodMode').value='day';$('defectRangeStatus').textContent='';syncRangeInputs();render();}
+export function renderQuality(data,start,end,checks=[],reportDownload=null){$('stageComparisonDetails').open=false;const link=$('qualityReportDownload');link.hidden=!reportDownload;if(reportDownload){link.href=reportDownload.url;link.download=reportDownload.filename;}else link.removeAttribute('href');analysis=restrictChartAnalysis(data);firstAxis='date';stageModels.clear();stageExports.clear();stageDrillPaths.clear();stageDrillLeaves.clear();stageChecks=(checks||[]).filter(r=>r.stage!=='SMT');periodStart=start;periodEnd=end;filters={startDate:start,endDate:end,granularity:'day',stage:'指定製程'};chartPages.clear();fillSelect('qualityProduct','全部產品',analysis.products.map(p=>[p.id,p.ic+'／'+p.model]),'');$('qualityDashboard').hidden=false;$('qualityEmpty').hidden=true;navigate('quality');$('qualitySelection').hidden=true;$('defectStatus').hidden=true;$('defectPeriodMode').value='day';$('defectRangeStatus').textContent='';syncRangeInputs();setupStageGroups();render();}
 $('qualityStage').onchange=()=>setFilter('stage',$('qualityStage').value);
 $('qualityProduct').onchange=()=>setFilter('product',$('qualityProduct').value);$('qualityOrder').onchange=()=>setFilter('order',$('qualityOrder').value);
 for(const [id,key] of [['defectDate','date'],['defectProcess','process'],['defectItem','defect']])$(id).onchange=()=>setFilter(key,$(id).value);
 $('defectReset').onclick=resetFilters;$('defectBack').onclick=back;$('defectOpen').onclick=()=>openDetails('ppid');$('defectOrders').onclick=()=>openDetails('order');$('defectDownload').onclick=()=>downloadChart(charts.at(-1),$('defectDownload'),true);$('defectClose').onclick=()=>$('defectDetails').close();$('defectSearch').oninput=()=>{detailPage=0;renderDetails();};$('defectPrev').onclick=()=>{detailPage--;renderDetails();};$('defectNext').onclick=()=>{detailPage++;renderDetails();};$('defectPeriodMode').onchange=syncRangeInputs;$('defectApplyRange').onclick=applyRange;
-window.addEventListener('resize',scheduleLayoutRender);for(const stage of stages)$('download-'+stage.key).onclick=()=>downloadStageExcel(stage);
+window.addEventListener('resize',scheduleLayoutRender);
 
 window.addEventListener('viewchange',({detail})=>{if(detail.page==='quality'&&analysis)scheduleLayoutRender();});
 
