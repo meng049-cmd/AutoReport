@@ -32,8 +32,8 @@ test('defect trend export has editable multi-series native lines, exact denomina
  const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('不良率推移');assert.equal(sheet.getCell('B1').value,'裂痕');assert.equal(sheet.getCell('C1').value,'異物');assert.equal(sheet.getCell('A3').value,'2026-10-06');assert.equal(sheet.getCell('B3').value,null);assert.equal(sheet.getCell('C3').value,null);assert.equal(sheet.getCell('C4').value,.02);assert.equal(book.getWorksheet('日期投入').getCell('B2').value,100);assert.equal(book.getWorksheet('已產生圖表').getImages().length,1);assert.ok(book.getWorksheet('推移明細'));
 });
 
-test('stage chart workbook uses editable AGGREGATE formulas sourced from only its three processes',async()=>{
- const rows=[{date:'2026-06-02',value:.5,processRows:[{process:'DAF熱壓投入',value:1},{process:'DAF外觀',value:0},{process:'功能一測試',value:.5}]},{date:'2026-06-03',value:null,processRows:[]}],bytes=await createStageChartWorkbook({key:'前段',title:'前段',target:.985,color:'#d54545'},rows),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const value=book.getWorksheet('每日階段良率').getCell('B2').value;assert.match(value.formula,/AGGREGATE\(1,6/);assert.equal(value.result,.5);assert.equal(book.getWorksheet('製程良率資料').getCell('C2').value,0);assert.equal(book.getWorksheet('每日階段良率').getCell('B3').value,null);
+test('stage chart workbook stores numeric results directly and retains its three source processes',async()=>{
+ const rows=[{date:'2026-06-02',value:.5,processRows:[{process:'DAF熱壓投入',value:1},{process:'DAF外觀',value:0},{process:'功能一測試',value:.5}]},{date:'2026-06-03',value:null,processRows:[]}],bytes=await createStageChartWorkbook({key:'前段',title:'前段',target:.985,color:'#d54545'},rows),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const value=book.getWorksheet('每日階段良率').getCell('B2').value;assert.equal(value,.5);assert.equal(book.getWorksheet('製程良率資料').getCell('C2').value,0);assert.equal(book.getWorksheet('每日階段良率').getCell('B3').value,null);
 });
 
 test('defect chart workbook computes plotted rates from its owning process input and bad PPID cells',async()=>{
