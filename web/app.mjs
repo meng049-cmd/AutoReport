@@ -85,8 +85,7 @@ $('autoAnalyze').onclick=async()=>{
    const output=await call('export'),file=new File([output],files[i].name.replace(/\.xlsx$/i,'_IC機種.xlsx'));matched.push(file);await addLibraryFile(file,{kind:'matched',sources:[{name:files[i].name,size:files[i].size,kind:'Detail'}],rows:result['筆數']});
   }
   $('message').textContent='一鍵處理：合併並計算每日階段良率與不良分析…';
-  const report=await calculateYieldFile(matched,msg=>{$('message').textContent='一鍵處理：'+msg;},{...getYieldOptions(),includeMerged:true,sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
-  await addLibraryFile(new File([report.merged.bytes],report.merged.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),{kind:'merged',sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'})),rows:report.output_rows});
+  const report=await calculateYieldFile(matched,msg=>{$('message').textContent='一鍵處理：'+msg;},{...getYieldOptions(),includeMerged:false,sources:files.map(file=>({name:file.name,size:file.size,kind:'Detail'}))});
   const saved=await addLibraryFile(new File([report.bytes],report.filename),{kind:'analysis',sources:report.analysis.sources,rows:report.output_rows});void saveAnalysisCache(saved.id,report);
   if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([report.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   const link=$('autoDownload');link.href=downloadUrl;link.download=report.filename;link.textContent='下載完整報表：'+report.filename;$('autoResult').hidden=false;

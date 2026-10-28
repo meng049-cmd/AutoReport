@@ -14,17 +14,17 @@
   class DetailMerger {
     constructor(XLSX,{skipInvalidRows=false}={}) { this.XLSX = XLSX; this.skipInvalidRows=skipInvalidRows;this.skippedRows=[];this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.analysisFirstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
     static readBook(XLSX,bytes) {
-      const names=XLSX.read(bytes,{type:'array',bookSheets:true}).SheetNames.filter(name=>name.trim().toLowerCase()==='detail');
-      if(names.length!==1)throw Error('找不到唯一的 Detail 分頁。');
-      return XLSX.read(bytes,{type:'array',dense:true,sheets:names[0]});
+      const names=XLSX.read(bytes,{type:'array',bookSheets:true}).SheetNames.filter(name=>/^detail(?:_\d+)?$/i.test(name.trim()));
+      if(!names.some(name=>name.trim().toLowerCase()==='detail'))throw Error('找不到 Detail 分頁。');
+      return XLSX.read(bytes,{type:'array',dense:true,sheets:names});
     }
     add(book, filename) {
       let sourceNames;try{const saved=JSON.parse(book.Custprops?.AutoReportSources||'null');if(Array.isArray(saved)&&saved.length&&saved.every(name=>typeof name==='string'&&name.trim()))sourceNames=saved;}catch{}
       for(const name of sourceNames||[filename])this.sources.add(name);
       const XLSX = this.XLSX;
-      const names = book.SheetNames.filter(name => name.trim().toLowerCase() === 'detail');
-      if (names.length !== 1) throw new Error(`${filename}：找不到唯一的 Detail 分頁。`);
-      const data = XLSX.utils.sheet_to_json(book.Sheets[names[0]], {header: 1, defval: null, blankrows: true, raw: true});
+      const names = book.SheetNames.filter(name => /^detail(?:_\d+)?$/i.test(name.trim()));
+      if (!names.length) throw new Error(`${filename}：找不到唯一的 Detail 分頁。`);
+      const data = [];for(const [part,name] of names.entries()){const values=XLSX.utils.sheet_to_json(book.Sheets[name], {header:1,defval:null,blankrows:true,raw:true});if(part&&JSON.stringify(values[0])!==JSON.stringify(data[0]))throw Error(`${filename}：Detail 分頁標題不一致。`);for(let i=part?1:0;i<values.length;i++)data.push(values[i]);}
       const header = data.shift();
       if (!header || header[0] !== '製程' || header[4] !== '小板序號') throw new Error(`${filename}：A 欄須為製程，E 欄須為小板序號。`);
       if (!this.header) {
@@ -83,9 +83,9 @@
       for(const key of defectKeys)this.defectKeys.add(key);
     }
     hasDefect(value) {return this.defectKeys.has(value.key||JSON.stringify([value.day,String(value.row[0]).trim(),String(value.row[4]).trim()]));}
-    finish({dense=false}={}) {
+    finish({dense=false,analysisOnly=false}={}) {
       if (!this.rows.size) throw new Error(this.skippedRows.length?`已略過 ${this.skippedRows.length} 列錯誤資料，Detail 沒有可分析的有效資料。`:'Detail 沒有可合併的資料。');
-      if (this.rows.size > 1048575) throw new Error('合併結果超過 Excel 單一分頁的列數上限，請減少上傳檔案。');
+      if (!analysisOnly && this.rows.size > 1048575) throw new Error('合併結果超過 Excel 單一分頁的列數上限，請減少上傳檔案。');
       const XLSX = this.XLSX, rows = [...this.rows.values()].sort((a,b) => a.timestamp - b.timestamp);
       const first = rows[0].day, last = rows.at(-1).day;
       const date = new Date(`${first}T00:00:00Z`);
@@ -93,12 +93,12 @@
       const year = date.getUTCFullYear();
       const week = Math.ceil((((date - Date.UTC(year,0,1)) / 86400000) + 1) / 7);
       const filename = `${year}_w${week}_${first.slice(5).replace('-','')}-${last.slice(5).replace('-','')}.xlsx`;
-      const sheet = XLSX.utils.aoa_to_sheet([this.header, ...rows.map(value => value.row)],{dense});
-      for (let i = 1; i <= rows.length; i++) {
+      const sheet = analysisOnly?null:XLSX.utils.aoa_to_sheet([this.header, ...rows.map(value => value.row)],{dense});
+      for (let i = 1; sheet && i <= rows.length; i++) {
         const cell = Array.isArray(sheet)?sheet[i]?.[this.time]:sheet[XLSX.utils.encode_cell({r:i,c:this.time})];
         if (cell) cell.z = 'yyyy-mm-dd hh:mm:ss';
       }
-      const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Detail');
+      const book = XLSX.utils.book_new(); if(sheet)XLSX.utils.book_append_sheet(book, sheet, 'Detail');
       book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
       book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.analysisFirstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));

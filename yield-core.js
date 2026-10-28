@@ -22,7 +22,7 @@ function buildYieldReport(merger,identities){
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
  const stageComparisons=[['日期','IC','機種','階段','採用：AGGREGATE製程平均良率','唯一PPID良率（比較）','良率差異（平均減唯一，百分點）','唯一投入PPID','唯一不良PPID','唯一PPID不良率','有資料製程數']],stageChecks=[],stageDetails=[['日期','IC','機種','階段','唯一良品PPID','唯一不良PPID','唯一投入PPID','良率','不良率']];
- const merged=merger.finish({dense:true}),dates=[];
+ const merged=merger.finish({dense:true,analysisOnly:true}),dates=[];
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
  const details=[['日期','IC','機種','製程','良品數量','不良數量','總數','良率','不良率']],indices=new Map();
@@ -73,7 +73,7 @@ function buildYieldReport(merger,identities){
  const comparisonSheet=XLSX.utils.aoa_to_sheet(stageComparisons);for(let r=2;r<=stageComparisons.length;r++){for(const col of ['E','F','J'])if(comparisonSheet[col+r])comparisonSheet[col+r].z='0.00%';comparisonSheet['G'+r]={t:stageComparisons[r-1][6]==null?'s':'n',v:stageComparisons[r-1][6]??'',f:`IF(OR(E${r}="",F${r}=""),"",(E${r}-F${r})*100)`,z:'0.0000'};}comparisonSheet['!cols']=stageComparisons[0].map(()=>({wch:25}));XLSX.utils.book_append_sheet(book,comparisonSheet,'階段良率比較');
  XLSX.utils.book_append_sheet(book,stageDetailSheet,'階段計算明細');
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
- XLSX.utils.book_append_sheet(book,merged.book.Sheets.Detail,'Detail');
+ const detailRows=[...merger.rows.values()].sort((a,b)=>a.timestamp-b.timestamp);for(let offset=0,part=1;offset<detailRows.length;offset+=1048575,part++){const sheet=XLSX.utils.aoa_to_sheet([merger.header,...detailRows.slice(offset,offset+1048575).map(value=>value.row)],{dense:true});for(let r=1;r<sheet.length;r++)if(sheet[r]?.[merger.time])sheet[r][merger.time].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,part===1?'Detail':'Detail_'+part);}
  if(pendingRows.length){const pending=XLSX.utils.aoa_to_sheet([merger.header,...pendingRows]);for(let r=2;r<=pendingRows.length+1;r++)if(pending['F'+r])pending['F'+r].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,pending,'待補產品資料');}
  book.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true}};
  return {book,calculation:{stageChecks,dailyCounts:[...counts.values()].map(({units,...count})=>count)},filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:pendingRows.length,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
