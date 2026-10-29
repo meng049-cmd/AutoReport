@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {matchFile,exportMatches} from './files.mjs';
 import {Matcher} from './matcher.mjs';
-import {applyMatchCorrections,summarizeMatchCorrections} from './match-corrections.mjs';
+import {applyMatchCorrections,summarizeMatchCorrections,correctionOptions,canonicalCorrectionName} from './match-corrections.mjs';
 test('Detail B/C matching appends J/K and preserves original XML cells and other sheets',async()=>{
  const book=new ExcelJS.Workbook();const detail=book.addWorksheet('Detail');
  detail.addRow(['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態']);
@@ -92,4 +92,14 @@ test('manual CSV corrections never replace unique database matches or unrelated 
  assert.equal(output.worksheets[0].getCell('C3').value,'手動補填');assert.equal(output.worksheets[0].getCell('D3').value,'Manual Model');
  assert.match(output.worksheets[0].getCell('H3').value,/本批次手動補填/);
  assert.throws(()=>applyMatchCorrections(result,[{key:known.key,ic:'',model:'Incomplete'}]),/完整填寫/);
+});
+
+test('existing IC/model options collapse format variants and corrections export the exact existing spelling',async()=>{
+ const options=correctionOptions([{ic:'Goodix',model:'CY26-16'},{ic:'ＧＯＯＤＩＸ',model:'cy26 - 16'},{ic:'-',model:'未知'},{ic:'N/A',model:''}]);
+ assert.deepEqual(options,{ics:['Goodix'],models:['CY26-16']});
+ assert.equal(canonicalCorrectionName(' goodix ',options.ics),'Goodix');assert.equal(canonicalCorrectionName(' New Model ',options.models),'New Model');
+ const result=await matchFile(new Matcher({records:[],keys:[]}),new TextEncoder().encode('工單號碼\nMISS1\n'),'query.csv');
+ applyMatchCorrections(result,[{key:summarizeMatchCorrections(result)[0].key,ic:' goodix ',model:'ＣＹ２６－１６'}],options);
+ const book=new ExcelJS.Workbook();await book.xlsx.load(await exportMatches(result));
+ assert.equal(book.worksheets[0].getCell('D2').value,'CY26-16');assert.equal(book.worksheets[0].getCell('E2').value,'Goodix');
 });

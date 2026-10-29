@@ -10,7 +10,7 @@ import JSZip from 'jszip';
 import {authenticatedAnalysis} from './auth-test-context.mjs';
 
 test('batch matching paginates missing orders, retains edits, regenerates Excel and replaces library results',async()=>{
- const reference={records:[{id:1,model:'Known Model',ic:'Known IC',parts:[],dpns:[],family:'',source_file:'reference.xlsx',sheet:'資料',row_number:2}],keys:[['order','known1',1]],stats:{'索引資料列':1,'分頁':[],'不重複工單':1,'機種IC組合':1}};
+ const reference={records:[{id:1,model:'Known Model',ic:'Known IC',parts:[],dpns:[],family:'',source_file:'reference.xlsx',sheet:'資料',row_number:2},{id:2,model:'CY26-16',ic:'Goodix'},{id:3,model:'Other Model',ic:'Synaptis'}],keys:[['order','known1',1]],stats:{'索引資料列':3,'分頁':[],'不重複工單':1,'機種IC組合':3}};
  const root=path.resolve('dist');
  const server=createServer(async(req,res)=>{
   const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
@@ -34,10 +34,13 @@ test('batch matching paginates missing orders, retains edits, regenerates Excel 
   await page.locator('#match').click();await page.waitForFunction(()=>!document.querySelector('#match').disabled&&document.querySelector('#message').textContent.includes('批次完成'));
   assert.match(await page.locator('#matchCorrectionSummary').innerText(),/51 組/);assert.equal(await page.locator('#matchCorrectionTable tbody tr').count(),50);
   const first=page.locator('#matchCorrectionTable tbody tr').first();assert.match(await first.innerText(),/MISS0/);assert.match(await first.innerText(),/first.xlsx/);assert.match(await first.innerText(),/second.xlsx/);
-  await page.locator('[data-correction-ic="0"]').fill('GOODIX');await page.locator('#matchRegenerate').click();assert.match(await page.locator('#message').innerText(),/完整填寫/);
-  await page.locator('[data-correction-model="0"]').fill('CY26-16');await page.locator('#matchCorrectionNext').click();
-  await page.locator('[data-correction-ic="50"]').fill('Synaptis');await page.locator('[data-correction-model="50"]').fill('CY26-50');
-  await page.locator('#matchCorrectionPrev').click();assert.equal(await page.locator('[data-correction-ic="0"]').inputValue(),'GOODIX');
+  assert.equal(await page.locator('[data-correction-ic="0"]').isHidden(),true);
+  assert.ok((await page.locator('[data-correction-select-ic="0"] option').allTextContents()).includes('Goodix'));
+  await page.locator('[data-correction-select-ic="0"]').selectOption({label:'Goodix'});await page.locator('#matchRegenerate').click();assert.match(await page.locator('#message').innerText(),/完整填寫/);
+  await page.locator('[data-correction-select-model="0"]').selectOption({label:'CY26-16'});await page.locator('#matchCorrectionNext').click();
+  await page.locator('[data-correction-select-ic="50"]').selectOption('new');await page.locator('[data-correction-ic="50"]').fill(' SYNAPTIS ');
+  await page.locator('[data-correction-select-model="50"]').selectOption('new');await page.locator('[data-correction-model="50"]').fill('CY26-50');
+  await page.locator('#matchCorrectionPrev').click();assert.equal(await page.locator('[data-correction-select-ic="0"] option:checked').innerText(),'Goodix');
   const before=await page.evaluate(()=>new Promise((resolve,reject)=>{const request=indexedDB.open('AutoReport-file-library');request.onsuccess=()=>{const db=request.result,read=db.transaction('files').objectStore('files').getAll();read.onsuccess=()=>{db.close();resolve(read.result.filter(item=>item.kind==='matched').map(item=>item.id).sort());};read.onerror=reject;};request.onerror=reject;}));
   assert.equal(before.length,2);
   await page.locator('#matchRegenerate').click();await page.waitForFunction(()=>!document.querySelector('#match').disabled&&document.querySelector('#matchCorrectionSummary').textContent.includes('4 筆已手動補填'));
@@ -47,7 +50,7 @@ test('batch matching paginates missing orders, retains edits, regenerates Excel 
   const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#export').click()]);assert.equal(download.suggestedFilename(),'AUTOREPORT 工單查找與品質分析_批次結果.zip');
   const zip=await JSZip.loadAsync(await readFile(await download.path()));
   const firstBook=new ExcelJS.Workbook();await firstBook.xlsx.load(await zip.file('AUTOREPORT 工單查找與品質分析_first_IC機種.xlsx').async('uint8array'));
-  const detail=firstBook.getWorksheet('Detail');assert.equal(detail.getCell('J2').text,'GOODIX');assert.equal(detail.getCell('K2').text,'CY26-16');assert.equal(detail.getCell('J52').text,'Synaptis');assert.equal(detail.getCell('J53').text,'GOODIX');assert.equal(detail.getCell('J54').text,'Known IC');assert.equal(detail.getCell('J3').text,'');assert.equal(detail.getCell('D2').text,'原始內容');
+  const detail=firstBook.getWorksheet('Detail');assert.equal(detail.getCell('J2').text,'Goodix');assert.equal(detail.getCell('K2').text,'CY26-16');assert.equal(detail.getCell('J52').text,'Synaptis');assert.equal(detail.getCell('J53').text,'Goodix');assert.equal(detail.getCell('J54').text,'Known IC');assert.equal(detail.getCell('J3').text,'');assert.equal(detail.getCell('D2').text,'原始內容');
   const secondBook=new ExcelJS.Workbook();await secondBook.xlsx.load(await zip.file('AUTOREPORT 工單查找與品質分析_second_IC機種.xlsx').async('uint8array'));assert.equal(secondBook.getWorksheet('Detail').getCell('K2').text,'CY26-16');
   assert.deepEqual(errors,[]);
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

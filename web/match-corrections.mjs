@@ -1,5 +1,19 @@
 import {norm,text} from './matcher.mjs';
 
+export function correctionOptions(records=[]){
+ const collect=field=>{
+  const values=new Map(),missing=new Set(['','-','n/a','na','none','无','未知']);
+  for(const record of records){const value=text(record[field]),key=norm(value);if(!missing.has(key)&&!values.has(key))values.set(key,value);}
+  return [...values.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true}));
+ };
+ return {ics:collect('ic'),models:collect('model')};
+}
+
+export function canonicalCorrectionName(value,options=[]){
+ const label=text(value),key=norm(label);
+ return options.find(option=>norm(option)===key)||label;
+}
+
 function identity(result,row){
  const criteria=(row['查找條件']||[]).map(item=>[item['欄位類別'],text(item['查找值'])]).filter(([,value])=>value);
  const order=criteria.find(([kind])=>kind==='order')?.[1]||'';
@@ -22,10 +36,10 @@ export function summarizeMatchCorrections(result){
  return [...groups.values()].map(group=>({...group,statuses:[...group.statuses],sheets:[...group.sheets]}));
 }
 
-export function applyMatchCorrections(result,corrections=[]){
+export function applyMatchCorrections(result,corrections=[],options={}){
  const updates=new Map();
  for(const correction of corrections){
-  const model=text(correction.model),ic=text(correction.ic);
+  const model=canonicalCorrectionName(correction.model,options.models),ic=canonicalCorrectionName(correction.ic,options.ics);
   if(!correction.key||!model||!ic)throw Error('補填對照必須完整填寫 IC 與機種。');
   const previous=updates.get(correction.key);
   if(previous&&(previous.model!==model||previous.ic!==ic))throw Error('同一工單／料號有不同補填對照，請確認後再試。');
