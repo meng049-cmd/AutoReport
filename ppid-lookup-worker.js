@@ -44,7 +44,7 @@ function searchFile({buffer,file,targets}){
   const columns={process:findColumn(headers,['製程','Process'],0),order:findColumn(headers,['工單','工單號碼','Order'],1),part:findColumn(headers,['料號','產品料號','Part'],2),serial:findColumn(headers,['小板序號','PPID','Serial','序號'],4),time:findColumn(headers,['產出時間','時間','Time','Date'],5),defect:findColumn(headers,['不良項目','不良','Defect'],7),status:findColumn(headers,['狀態','Status','Result'],8),ic:findColumn(headers,['IC','IC型號'],9),model:findColumn(headers,['機種','Model'],10)};
   for(let r=range.s.r+1;r<=range.e.r;r++){
    const serial=cellValue(sheet,r,columns.serial,dense),canonical=key(serial);if(!targetMap.has(canonical))continue;
-   matches.push({id:file.id,name:file.name,collection:file.collection,source:file.source,ppid:targetMap.get(canonical),process:cellValue(sheet,r,columns.process,dense),order:cellValue(sheet,r,columns.order,dense),part:cellValue(sheet,r,columns.part,dense),time:cellValue(sheet,r,columns.time,dense),defect:cellValue(sheet,r,columns.defect,dense),status:cellValue(sheet,r,columns.status,dense),ic:cellValue(sheet,r,columns.ic,dense),model:cellValue(sheet,r,columns.model,dense),sheet:sheetName,row:r-range.s.r+1});
+   matches.push({id:file.id,name:file.name,collection:file.collection,source:file.source,ppid:targetMap.get(canonical),process:cellValue(sheet,r,columns.process,dense),headers:headers.map((value,index)=>value||`欄位 ${index+1}`),rowData:headers.map((_,col)=>cellValue(sheet,r,col,dense)),sheet:sheetName,row:r-range.s.r+1});
    if(matches.length>=10000){truncated=true;break;}
   }
   if(truncated)break;
