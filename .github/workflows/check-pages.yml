@@ -26,6 +26,8 @@ jobs:
       - run: npm test
       - run: node --test cloud/cloud-sync.test.mjs
       - run: npx playwright install --with-deps chromium
+      - name: Verify manual IC and model corrections
+        run: node --test web/match-corrections.browser.test.mjs
       - run: node --test cloud/cloud-sync.browser.test.mjs cloud/auth-gate.browser.test.mjs
       - run: npm run test:browser
       - uses: actions/upload-artifact@v4
