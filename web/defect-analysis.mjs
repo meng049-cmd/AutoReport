@@ -19,11 +19,12 @@ const dayMs=86400000, iso=time=>new Date(time).toISOString().slice(0,10);
 export function calendarDates(start,end){const dates=[];for(let time=Date.parse(start+'T00:00:00Z'),last=Date.parse(end+'T00:00:00Z');Number.isFinite(time)&&time<=last;time+=dayMs)dates.push(iso(time));return dates;}
 export function periodKey(date,mode='day'){
  if(mode==='month')return date.slice(0,7);if(mode!=='week')return date;
- const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+4-(d.getUTCDay()||7));const year=d.getUTCFullYear(),week=Math.ceil(((d-Date.UTC(year,0,1))/dayMs+1)/7);return year+'-W'+String(week).padStart(2,'0');
+ const year=Number(date.slice(0,4)),day=Date.parse(date+'T00:00:00Z'),first=Date.UTC(year,0,1),firstSunday=first-new Date(first).getUTCDay()*dayMs;
+ return year+'-W'+String(Math.floor((day-new Date(day).getUTCDay()*dayMs-firstSunday)/(7*dayMs))+1).padStart(2,'0');
 }
 export function periodBounds(key,mode='day'){
  if(mode==='month'){if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))return null;const [y,m]=key.split('-').map(Number);return {start:key+'-01',end:iso(Date.UTC(y,m,0))};}
- if(mode==='week'){if(!/^\d{4}-W\d{2}$/.test(key))return null;const [y,w]=key.split('-W').map(Number),jan4=new Date(Date.UTC(y,0,4)),start=Date.UTC(y,0,4)-(jan4.getUTCDay()+6)%7*dayMs+(w-1)*7*dayMs;if(periodKey(iso(start),'week')!==key)return null;return {start:iso(start),end:iso(start+6*dayMs)};}
+ if(mode==='week'){if(!/^\d{4}-W\d{2}$/.test(key))return null;const [y,w]=key.split('-W').map(Number),first=Date.UTC(y,0,1),start=first-new Date(first).getUTCDay()*dayMs+(w-1)*7*dayMs;if(periodKey(iso(Math.max(start,first)),'week')!==key)return null;return {start:iso(start),end:iso(start+6*dayMs)};}
  if(!/^\d{4}-\d{2}-\d{2}$/.test(key)||!Number.isFinite(Date.parse(key+'T00:00:00Z'))||iso(Date.parse(key+'T00:00:00Z'))!==key)return null;return {start:key,end:key};
 }
 export function periodLabel(key,mode='day'){
@@ -32,8 +33,9 @@ export function periodLabel(key,mode='day'){
 export function calendarBuckets(start,end,mode='day'){
  const map=new Map();for(const date of calendarDates(start,end)){const key=periodKey(date,mode);if(!map.has(key))map.set(key,{key,label:periodLabel(key,mode),...periodBounds(key,mode)});}return [...map.values()];
 }
+export function scopedBuckets(start,end,filters={}){const buckets=calendarBuckets(start,end,filters.granularity);return filters.granularity==='day'&&filters.days?.length?buckets.filter(bucket=>filters.days.includes(bucket.key)):buckets;}
 export const orderName=value=>String(value??'').trim()||'【未填工單】';
-function matches(row,filters,ignoreDefect=false){return !filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
+function matches(row,filters,ignoreDefect=false){return !filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.days?.length||filters.days.includes(row.date))&&(!filters.date||periodKey(row.date,filters.granularity)===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
 export function attributedRows(analysis,filters={}){const scope=processScope(filters);return analysis.attribution.filter(row=>matches(row,scope));}
 export function filteredObservations(analysis,filters={}){const scope=processScope(filters);return (analysis.observations||[]).filter(row=>matches(row,scope,true));}
 /** Current-period quality uses actual scoped observations, with each PPID counted once. */
@@ -46,8 +48,8 @@ const cohortCaches=new WeakMap();
 export function cohortInput(analysis,filters={}){
  filters=processScope(filters);if(filters.invalidProcess)return 0;
  let cache=cohortCaches.get(analysis);if(!cache){cache=new Map();cohortCaches.set(analysis,cache);}
- const rangeKey=JSON.stringify([filters.startDate||'',filters.endDate||'',filters.granularity||'day',filters.order||'',filters.stage||'']);
- if(analysis.observations){let totals=cache.get(rangeKey);if(!totals){const sets=new Map();for(const row of analysis.observations){if(filters.stage&&!isStageProcess(row.process,filters.stage))continue;if(filters.order&&orderName(row.order)!==filters.order)continue;if((filters.startDate&&row.date<filters.startDate)||(filters.endDate&&row.date>filters.endDate))continue;const bucket=periodKey(row.date,filters.granularity);for(const product of ['',row.product])for(const date of ['',bucket])for(const process of ['',row.process]){const key=JSON.stringify([product,date,process]);let set=sets.get(key);if(!set){set=new Set();sets.set(key,set);}set.add(row.serial);}}totals=new Map([...sets].map(([key,set])=>[key,set.size]));cache.set(rangeKey,totals);}return totals.get(JSON.stringify([filters.product||'',filters.date||'',filters.process||'']))||0;}
+ const rangeKey=JSON.stringify([filters.startDate||'',filters.endDate||'',filters.granularity||'day',filters.order||'',filters.stage||'',filters.days||[]]);
+ if(analysis.observations){let totals=cache.get(rangeKey);if(!totals){const sets=new Map();for(const row of analysis.observations){if(filters.stage&&!isStageProcess(row.process,filters.stage))continue;if(filters.order&&orderName(row.order)!==filters.order)continue;if((filters.startDate&&row.date<filters.startDate)||(filters.endDate&&row.date>filters.endDate)||(filters.days?.length&&!filters.days.includes(row.date)))continue;const bucket=periodKey(row.date,filters.granularity);for(const product of ['',row.product])for(const date of ['',bucket])for(const process of ['',row.process]){const key=JSON.stringify([product,date,process]);let set=sets.get(key);if(!set){set=new Set();sets.set(key,set);}set.add(row.serial);}}totals=new Map([...sets].map(([key,set])=>[key,set.size]));cache.set(rangeKey,totals);}return totals.get(JSON.stringify([filters.product||'',filters.date||'',filters.process||'']))||0;}
  let count;if(!filters.date&&!filters.startDate&&!filters.endDate)count=filters.product?(filters.process?analysis.productProcesses.find(p=>p.product===filters.product&&p.process===filters.process)?.total:analysis.products.find(p=>p.id===filters.product)?.total):(filters.process?analysis.processes.find(p=>p.process===filters.process)?.total:analysis.total);
  else {count=0;const totals=filters.process?analysis.dailyProcessTotals:analysis.dailyProductTotals;for(const [key,total] of totals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))count+=total;}}
  return count||0;
@@ -56,8 +58,8 @@ const dateAuditCaches=new WeakMap();
 export function dateInputAudits(analysis,filters={}){
  filters=processScope(filters);
  let cache=dateAuditCaches.get(analysis);if(!cache){cache=new Map();dateAuditCaches.set(analysis,cache);}
- const key=JSON.stringify([filters.startDate,filters.endDate,filters.granularity||'day',filters.product||'',filters.order||'',filters.process||'',filters.stage||'']);if(cache.has(key))return cache.get(key);
- const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),sets=new Map(buckets.map(bucket=>[bucket.key,{units:new Set(),processes:new Map()}]));
+ const key=JSON.stringify([filters.startDate,filters.endDate,filters.granularity||'day',filters.product||'',filters.order||'',filters.process||'',filters.stage||'',filters.days||[]]);if(cache.has(key))return cache.get(key);
+ const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),sets=new Map(buckets.map(bucket=>[bucket.key,{units:new Set(),processes:new Map()}]));
  for(const row of filteredObservations(analysis,{...filters,date:'',defect:''})){const group=sets.get(periodKey(row.date,filters.granularity));if(!group)continue;group.units.add(row.serial);let process=group.processes.get(row.process);if(!process){process=new Set();group.processes.set(row.process,process);}process.add(row.serial);}
  const result=buckets.map(bucket=>{const group=sets.get(bucket.key),uniqueInput=group.units.size,processInputSum=[...group.processes.values()].reduce((sum,units)=>sum+units.size,0),input=cohortInput(analysis,{...filters,date:bucket.key});return {...bucket,uniqueInput,processInputSum,repeatedInput:processInputSum-uniqueInput,input,consistent:input===uniqueInput};});cache.set(key,result);return result;
 }
@@ -65,7 +67,7 @@ export function defectBreakdown(analysis,filters={},dates=[],order=dimensions){
  const records=attributedRows(analysis,filters),dimension=order.find(key=>!filters[key])||null,groupMap=new Map();
  const ensure=(key,label,meta={})=>{if(!groupMap.has(key))groupMap.set(key,{key,label,count:0,...meta});return groupMap.get(key);};
  if(dimension==='product')for(const product of analysis.products)if(cohortInput(analysis,{...filters,product:product.id})||records.some(row=>row.product===product.id))ensure(product.id,product.ic+'／'+product.model);
- if(dimension==='date'){const start=filters.startDate||dates[0]||analysis.start_date,end=filters.endDate||dates.at(-1)||analysis.end_date;for(const bucket of calendarBuckets(start,end,filters.granularity))ensure(bucket.key,bucket.label);}
+ if(dimension==='date'){const start=filters.startDate||dates[0]||analysis.start_date,end=filters.endDate||dates.at(-1)||analysis.end_date;for(const bucket of scopedBuckets(start,end,filters))ensure(bucket.key,bucket.label);}
  if(dimension==='process'){if(analysis.observations)for(const row of filteredObservations(analysis,filters))ensure(row.process,row.process);else for(const [key] of analysis.dailyProcessTotals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))ensure(process,process);}}
  for(const row of records)if(dimension){const key=dimension==='date'?periodKey(row.date,filters.granularity):dimension==='defect'?defectKey(row.process,row.defect):row[dimension],label=dimension==='product'?row.ic+'／'+row.model:dimension==='defect'?row.defect+(filters.process?'':' · '+row.process):key;ensure(key,label,dimension==='defect'?{process:row.process,defect:row.defect}:{}).count++;}
  const groups=[...groupMap.values()].map(group=>{const input=cohortInput(analysis,{...filters,[dimension]:group.key});return {...group,input,rate:input?group.count/input:null,contribution:analysis.total?group.count/analysis.total:0};});
@@ -92,7 +94,7 @@ export function orderYieldRows(analysis,filters={}){
 }
 export function defectTrend(analysis,filters={}){
  if(filters.stage)return stageDefectTrend(analysis,filters);
- const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),inputs=new Map(buckets.map(b=>[b.key,new Set()])),counts=new Map(),bad=new Map(),items=new Set(),scope={...filters,date:'',defect:''};
+ const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),inputs=new Map(buckets.map(b=>[b.key,new Set()])),counts=new Map(),bad=new Map(),items=new Set(),scope={...filters,date:'',defect:''};
  for(const row of filteredObservations(analysis,scope))inputs.get(periodKey(row.date,filters.granularity))?.add(row.serial);
  for(const row of attributedRows(analysis,scope)){if(filters.defect&&row.defect!==filters.defect)continue;const key=periodKey(row.date,filters.granularity);items.add(row.defect);const group=counts.get(row.defect)||new Map();group.set(key,(group.get(key)||0)+1);counts.set(row.defect,group);bad.set(key,(bad.get(key)||0)+1);}
  if(filters.defect)items.add(filters.defect);
@@ -112,13 +114,13 @@ export function orderStageSeries(analysis,stage,filters={},dates=[]){
 }
 /** Compare both stages for each visible day/week/month, pooling products before process means. */
 export function stageComparisonRows(analysis,filters={}){
- const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map();
+ const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map();
  for(const row of rows){const key=periodKey(row.date,filters.granularity),group=groups.get(key)||[];group.push(row);groups.set(key,group);}
  return buckets.flatMap(bucket=>(['前段','後段'].includes(filters.stage)?[filters.stage]:['前段','後段']).map(stage=>({...bucket,stage,...summarizeStage(groups.get(bucket.key)||[],stage)})));
 }
 
 function stageDefectTrend(analysis,filters){
- const buckets=calendarBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters.granularity),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map(),definitions=new Map();
+ const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map(),definitions=new Map();
  const add=(map,row)=>{const old=map.get(row.serial);if(!old||(!old.fail&&row.fail)||(row.fail&&row.status==='FAIL'&&old.status!=='FAIL'))map.set(row.serial,row);};
  for(const row of rows){if(row.attributionOnly||!isStageProcess(row.process,filters.stage))continue;const key=periodKey(row.date,filters.granularity),group=groups.get(key)||[];group.push(row);groups.set(key,group);}
  const data=buckets.map(bucket=>{const rows=groups.get(bucket.key)||[],metrics=summarizeStage(rows,filters.stage),processes=new Map(),counts=new Map();

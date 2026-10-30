@@ -1,12 +1,13 @@
 import {buildStageAnalysis} from './stage-analysis.mjs';
 import {summarizeStage} from './stage-metrics.mjs';
-import {periodKey,periodBounds} from './defect-analysis.mjs';
-export function productStageSeries(analysis,productId,stage,start,end){
- const products=analysis.products.filter(p=>p.id===productId),observations=(analysis.observations||[]).filter(row=>row.product===productId),scoped={...analysis,products,observations};
- const model=buildStageAnalysis(scoped,stage,start,end,[]),current=periodBounds(periodKey(end,'week'),'week'),previous=new Date(current.start+'T00:00:00Z');previous.setUTCDate(previous.getUTCDate()-7);
- const weeks=[periodKey(previous.toISOString().slice(0,10),'week'),periodKey(end,'week')].map(date=>{
-  const bounds=periodBounds(date,'week'),rows=observations.filter(row=>row.date>=bounds.start&&row.date<=bounds.end&&row.date>=start&&row.date<=end);
-  return {date,label:date.slice(5),kind:'week',start:bounds.start,end:bounds.end,...summarizeStage(rows,stage)};
+import {calendarBuckets} from './defect-analysis.mjs';
+export function productStageSeries(analysis,productId,stage,start,end,days=[]){
+ const products=analysis.products.filter(p=>p.id===productId),observations=(analysis.observations||[]).filter(row=>row.product===productId&&(!days.length||days.includes(row.date))),scoped={...analysis,products,observations};
+ const model=buildStageAnalysis(scoped,stage,start,end,[]);
+ const earlier=new Date(start+'T00:00:00Z');earlier.setUTCDate(earlier.getUTCDate()-7);
+ const weeks=calendarBuckets(earlier.toISOString().slice(0,10),end,'week').slice(-2).map(bucket=>{
+  const rows=observations.filter(row=>row.date>=bucket.start&&row.date<=bucket.end&&row.date>=start&&row.date<=end&&row.date.slice(0,4)===bucket.key.slice(0,4));
+  return {date:bucket.key,label:bucket.key.slice(5),kind:'week',start:bucket.start,end:bucket.end,...summarizeStage(rows,stage)};
  });
- return {...model,weeks,chartRows:[...weeks,...model.daily]};
+ const daily=model.daily.filter(row=>!days.length||days.includes(row.date));return {...model,daily,weeks,chartRows:[...weeks,...daily]};
 }

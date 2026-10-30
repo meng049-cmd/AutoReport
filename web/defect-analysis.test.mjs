@@ -8,6 +8,7 @@ test('trend exposure unions PPIDs across eligible processes and period dates, ex
  const analysis=ctx.analyzeQuality(merger),scope={startDate:'2026-10-12',endDate:'2026-10-14'};
  assert.equal(analysis.total,2);assert.equal(analysis.fail,1);assert.equal(analysis.attribution[0].defect,'eligible defect');assert.ok(analysis.observations.every(row=>!row.process.includes('AOI')));
  const daily=defectTrend(analysis,scope);assert.deepEqual(daily.dates.map(d=>d.input),[2,1,0]);assert.deepEqual(daily.dates.map(d=>d.rate),[.5,0,null]);
+ const selected={...scope,granularity:'day',days:['2026-10-12','2026-10-14']};assert.deepEqual(defectTrend(analysis,selected).dates.map(d=>d.key),['2026-10-12','2026-10-14']);assert.equal(cohortInput(analysis,selected),2);assert.equal(scopedQualitySummary(analysis,selected).total,2);
  const front=defectTrend(analysis,{...scope,process:'DAF外觀'}),test=defectTrend(analysis,{...scope,process:'功能一測試'});assert.equal(front.dates[0].input,2);assert.equal(test.dates[0].input,1);assert.equal(daily.dates[0].input,2,'combined input is a union, not 2 + 1');
  for(const granularity of ['day','week','month']){const audit=dateInputAudits(analysis,{...scope,granularity});assert.ok(audit.every(row=>row.consistent));assert.equal(audit[0].uniqueInput,2);assert.equal(audit[0].processInputSum,3);assert.equal(audit[0].repeatedInput,1);}
  for(const granularity of ['week','month']){const period=defectTrend(analysis,{...scope,granularity});assert.equal(period.dates[0].input,2);assert.equal(period.dates[0].count,1);assert.equal(period.dates[0].rate,.5);}
@@ -30,9 +31,9 @@ test('complete hierarchy retains all defect names rather than limiting to a rank
 });
 
 
-test('day, ISO week and month ranges retain empty dates and deduplicate inputs across days',()=>{
- assert.equal(periodKey('2021-01-01','week'),'2020-W53');assert.deepEqual(periodBounds('2020-W53','week'),{start:'2020-12-28',end:'2021-01-03'});assert.equal(periodBounds('2021-W53','week'),null);assert.equal(periodBounds('2026-02-30'),null);assert.deepEqual(periodBounds('2024-02','month'),{start:'2024-02-01',end:'2024-02-29'});
- assert.equal(calendarBuckets('2026-10-01','2026-10-31').length,31);assert.equal(calendarBuckets('2026-09-01','2026-11-30','month').length,3);
+test('day, Sunday–Saturday week and month ranges retain empty dates and deduplicate inputs across days',()=>{
+ assert.equal(periodKey('2021-01-01','week'),'2021-W01');assert.deepEqual(periodBounds('2026-W02','week'),{start:'2026-01-04',end:'2026-01-10'});assert.equal(periodBounds('2021-W54','week'),null);assert.equal(periodBounds('2026-02-30'),null);assert.deepEqual(periodBounds('2024-02','month'),{start:'2024-02-01',end:'2024-02-29'});
+ assert.equal(periodKey('2026-01-10','week'),'2026-W02');assert.equal(periodKey('2026-01-11','week'),'2026-W03');assert.equal(calendarBuckets('2026-10-01','2026-10-31').length,31);assert.equal(calendarBuckets('2026-09-01','2026-11-30','month').length,3);
  const analysis=fixture(),product=analysis.products.find(p=>p.ic==='A').id,range={startDate:'2026-10-01',endDate:'2026-10-31',granularity:'week',product};assert.equal(cohortInput(analysis,range),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W41'}),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W40'}),0);
  const weekly=defectBreakdown(analysis,range);assert.equal(weekly.groups.length,5);assert.equal(weekly.groups.reduce((n,r)=>n+r.count,0),2);assert.equal(weekly.groups.find(r=>r.key==='2026-W40').input,0);assert.equal(weekly.groups.find(r=>r.key==='2026-W40').rate,null);
  const month=defectBreakdown(analysis,{...range,granularity:'month',startDate:'2026-09-01',endDate:'2026-11-30'});assert.deepEqual(month.groups.map(g=>g.count),[0,2,0]);assert.equal(month.groups[1].input,3);
@@ -43,7 +44,7 @@ test('day, ISO week and month ranges retain empty dates and deduplicate inputs a
 
 
 test('week labels show month/day intervals and preserve cross-year boundaries',()=>{
- assert.equal(periodLabel('2026-W42','week'),'10/12–10/18');assert.equal(periodLabel('2020-W53','week'),'2020/12/28–2021/01/03');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/12–10/18');
+ assert.equal(periodLabel('2026-W42','week'),'10/11–10/17');assert.equal(periodLabel('2020-W53','week'),'2020/12/27–2021/01/02');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/11–10/17');
 });
 
 
