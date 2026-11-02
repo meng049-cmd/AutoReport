@@ -24,7 +24,7 @@ test('batch matching paginates missing orders, retains edits, regenerates Excel 
  try{
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});
   const context=await browser.newContext();await authenticatedAnalysis(context);const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}/#matching`);await page.waitForFunction(()=>!document.querySelector('#match').disabled);
+  await page.goto(`http://127.0.0.1:${server.address().port}/#matching`);await page.waitForSelector('#match');await page.waitForFunction(()=>{const button=document.querySelector('#match');return button&&!button.disabled;});
   assert.equal(await page.title(),'AUTOREPORT 工單查找與品質分析');
   const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Detail');sheet.addRow(['製程','工單','料號','品名規格','小板序號']);
   for(let index=0;index<51;index++)sheet.addRow(['DAF外觀','MISS'+index,'PART'+index,'原始內容','PPID'+index]);
@@ -54,7 +54,7 @@ test('batch matching paginates missing orders, retains edits, regenerates Excel 
   const secondBook=new ExcelJS.Workbook();await secondBook.xlsx.load(await zip.file('AUTOREPORT 工單查找與品質分析_second_IC機種.xlsx').async('uint8array'));assert.equal(secondBook.getWorksheet('Detail').getCell('K2').text,'CY26-16');
   await page.locator('#matchConfirmDatabase').click();
   await page.waitForFunction(()=>document.querySelector('#matchCorrectionSaveStatus').textContent.includes('已確認並儲存'),{},{timeout:120000});
-  await page.reload();await page.waitForSelector('#match');await page.waitForFunction(()=>!document.querySelector('#match').disabled);
+  await page.reload();await page.waitForSelector('#match');await page.waitForFunction(()=>{const button=document.querySelector('#match');return button&&!button.disabled;});
   await page.locator('#file').setInputFiles([{name:'same-orders.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(await other.xlsx.writeBuffer())}]);
   await page.locator('#match').click();await page.waitForFunction(()=>!document.querySelector('#match').disabled&&document.querySelector('#message').textContent.includes('完成'));
   assert.match(await page.locator('#message').innerText(),/唯一匹配 1 筆/);
