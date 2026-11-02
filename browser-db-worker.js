@@ -31,8 +31,10 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
   const corrections=[...(current.manual_corrections||[])];
   for(const item of file){
    if(!item.order||!item.ic||!item.model)throw Error('補填資料缺少工單、IC 或機種，請重新套用結果。');
-   const part=item.part||'',index=corrections.findIndex(row=>row.order===item.order&&(row.part||'')===part);
-   const saved={order:item.order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
+   let terms;try{terms=JSON.parse(item.key);}catch{throw Error('補填對照的查找條件無效，請重新套用結果。');}
+   const order=terms.find(([kind])=>kind==='order')?.[1]||item.order,part=terms.find(([kind])=>kind==='part')?.[1]||'';
+   const index=corrections.findIndex(row=>row.order===order&&(row.part||'')===part);
+   const saved={order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
    if(index>=0)corrections[index]=saved;else corrections.push(saved);
   }
   const reference={...current,manual_corrections:corrections};
