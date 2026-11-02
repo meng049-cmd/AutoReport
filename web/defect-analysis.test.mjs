@@ -32,19 +32,19 @@ test('complete hierarchy retains all defect names rather than limiting to a rank
 
 
 test('day, Sunday–Saturday week and month ranges retain empty dates and deduplicate inputs across days',()=>{
- assert.equal(periodKey('2021-01-01','week'),'2021-W01');assert.deepEqual(periodBounds('2026-W02','week'),{start:'2026-01-04',end:'2026-01-10'});assert.equal(periodBounds('2021-W54','week'),null);assert.equal(periodBounds('2026-02-30'),null);assert.deepEqual(periodBounds('2024-02','month'),{start:'2024-02-01',end:'2024-02-29'});
- assert.equal(periodKey('2026-01-10','week'),'2026-W02');assert.equal(periodKey('2026-01-11','week'),'2026-W03');assert.equal(calendarBuckets('2026-10-01','2026-10-31').length,31);assert.equal(calendarBuckets('2026-09-01','2026-11-30','month').length,3);
- const analysis=fixture(),product=analysis.products.find(p=>p.ic==='A').id,range={startDate:'2026-10-01',endDate:'2026-10-31',granularity:'week',product};assert.equal(cohortInput(analysis,range),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W41'}),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W40'}),0);
+ assert.equal(periodKey('2021-01-01','week'),'2020-W51');assert.deepEqual(periodBounds('2026-W02','week'),{start:'2026-01-18',end:'2026-01-24'});assert.deepEqual(periodBounds('2025-W52','week'),{start:'2026-01-04',end:'2026-01-10'});assert.equal(periodBounds('2021-W54','week'),null);assert.equal(periodBounds('2026-02-30'),null);assert.deepEqual(periodBounds('2024-02','month'),{start:'2024-02-01',end:'2024-02-29'});
+ assert.equal(periodKey('2026-01-10','week'),'2025-W52');assert.equal(periodKey('2026-01-11','week'),'2026-W01');assert.equal(periodKey('2026-10-25','week'),'2026-W42');assert.equal(calendarBuckets('2026-10-01','2026-10-31').length,31);assert.equal(calendarBuckets('2026-09-01','2026-11-30','month').length,3);
+ const analysis=fixture(),product=analysis.products.find(p=>p.ic==='A').id,range={startDate:'2026-10-01',endDate:'2026-10-31',granularity:'week',product};assert.equal(cohortInput(analysis,range),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W39'}),3);assert.equal(cohortInput(analysis,{...range,date:'2026-W38'}),0);
  const weekly=defectBreakdown(analysis,range);assert.equal(weekly.groups.length,5);assert.equal(weekly.groups.reduce((n,r)=>n+r.count,0),2);assert.equal(weekly.groups.find(r=>r.key==='2026-W40').input,0);assert.equal(weekly.groups.find(r=>r.key==='2026-W40').rate,null);
  const month=defectBreakdown(analysis,{...range,granularity:'month',startDate:'2026-09-01',endDate:'2026-11-30'});assert.deepEqual(month.groups.map(g=>g.count),[0,2,0]);assert.equal(month.groups[1].input,3);
  const selected={startDate:'2026-10-05',endDate:'2026-10-05',product};assert.equal(attributedRows(analysis,selected).some(r=>r.serial==='a'),false,'later first FAIL is not reassigned to a selected earlier GOOD defect');assert.equal(cohortInput(analysis,selected),3);
  const order=workOrderRows(analysis,range);assert.equal(order.length,1);assert.equal(order[0].input,3);assert.equal(order[0].count,2);assert.equal(order[0].order,'o');assert.match(order[0].defects,/first FAIL/);
- const leaves=allDefectLevels(analysis,range).filter(r=>r.level==='defect');assert.equal(leaves.reduce((n,r)=>n+r.count,0),2);assert.ok(leaves.every(r=>r.date==='2026-W41'));
+ const leaves=allDefectLevels(analysis,range).filter(r=>r.level==='defect');assert.equal(leaves.reduce((n,r)=>n+r.count,0),2);assert.ok(leaves.every(r=>r.date==='2026-W39'));
 });
 
 
 test('week labels show month/day intervals and preserve cross-year boundaries',()=>{
- assert.equal(periodLabel('2026-W42','week'),'10/11–10/17');assert.equal(periodLabel('2020-W53','week'),'2020/12/27–2021/01/02');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/11–10/17');
+ assert.equal(periodLabel('2026-W42','week'),'10/25–10/31');assert.equal(periodLabel('2020-W53','week'),'2021/01/10–2021/01/16');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/11–10/17');
 });
 
 
@@ -87,22 +87,22 @@ function sharedDefectFixture(){
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX),row=(serial,process,status,ic='A',day=5,order='o')=>[process,order,'p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',status==='FAIL'?'CG內異物':'',status,ic,'Model'];
  ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','P1','FAIL'),row('b','P1','GOOD'),row('c','P2','FAIL','B'),row('d','P2','GOOD','B'),row('e','P2','GOOD'),row('f','P2','GOOD','A',5,'other'),row('b','P2','GOOD'),row('g','P3','GOOD'),row('a','P1','GOOD','A',6),row('b','P1','GOOD','A',6)]),'Detail');merger.add(book,'same-defect.xlsx');return ctx.analyzeQuality(merger);
 }
-test('defect-first groups split the same name by process and use all good and bad inputs of that process',()=>{
- const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},order=defectDimensions('defect'),view=defectBreakdown(analysis,scope,[],order),p1=view.groups.find(g=>g.process==='P1'),p2=view.groups.find(g=>g.process==='P2');
- assert.equal(analysis.total,7);assert.equal(view.groups.length,2);assert.equal(p1.input,2);assert.equal(p1.rate,.5);assert.equal(p2.input,5);assert.equal(p2.rate,.2);assert.equal(p1.contribution,1/7);assert.equal(p2.contribution,1/7);assert.notEqual(p1.key,p2.key);assert.deepEqual(parseDefectKey(p1.key),{process:'P1',defect:'CG內異物'});assert.equal(defectFilterLabel(p1.key),'CG內異物 · P1');
- const next=defectBreakdown(analysis,{...scope,defect:p1.key},[],order);assert.equal(next.dimension,'product');assert.equal(next.input,2);assert.equal(next.count,1);assert.equal(next.records[0].process,'P1');assert.ok(next.groups.every(g=>g.input<=2));
- assert.equal(cohortInput(analysis,{...scope,defect:p1.key,process:'P2'}),0);assert.equal(attributedRows(analysis,{...scope,defect:p1.key,process:'P2'}).length,0);
+test('defect-first groups merge the same name across processes and use their unique input union',()=>{
+ const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},order=defectDimensions('defect'),view=defectBreakdown(analysis,scope,[],order),item=view.groups[0];
+ assert.equal(analysis.total,7);assert.equal(view.groups.length,1);assert.equal(item.key,'CG內異物');assert.equal(item.label,'CG內異物');assert.equal(item.input,7);assert.equal(item.count,2);assert.equal(item.rate,2/7);assert.equal(item.contribution,2/7);assert.deepEqual(parseDefectKey(item.key),{defect:'CG內異物'});assert.equal(defectFilterLabel(item.key),'CG內異物');
+ const next=defectBreakdown(analysis,{...scope,defect:item.key},[],order);assert.equal(next.dimension,'product');assert.equal(next.input,7);assert.equal(next.count,2);assert.deepEqual(new Set(next.records.map(row=>row.process)),new Set(['P1','P2']));assert.ok(next.groups.every(g=>g.input<=7));
+ assert.equal(cohortInput(analysis,{...scope,defect:item.key,process:'P2'}),5);assert.equal(attributedRows(analysis,{...scope,defect:item.key,process:'P2'}).length,1);
 });
 test('defect ownership persists across product/date drilldowns, order filters and week/month unique PPID counting',()=>{
  const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},key=defectKey('P2','CG內異物'),order=defectDimensions('defect'),product=analysis.products.find(p=>p.ic==='B').id;
- assert.equal(cohortInput(analysis,{...scope,defect:key}),5);assert.equal(cohortInput(analysis,{...scope,defect:key,order:'o'}),4);assert.equal(cohortInput(analysis,{...scope,defect:key,product}),2);
+ assert.equal(cohortInput(analysis,{...scope,defect:key}),7);assert.equal(cohortInput(analysis,{...scope,defect:key,order:'o'}),6);assert.equal(cohortInput(analysis,{...scope,defect:key,product}),2);
  const next=defectBreakdown(analysis,{...scope,defect:key,product},[],order);assert.equal(next.dimension,'date');assert.deepEqual(next.groups.map(g=>g.input),[2,0]);assert.equal(next.groups[0].rate,.5);assert.equal(next.groups[1].rate,null);
- for(const granularity of ['week','month']){const view=defectBreakdown(analysis,{...scope,granularity},[],order);assert.equal(view.groups.find(g=>g.process==='P1').input,2);assert.equal(view.groups.find(g=>g.process==='P2').input,5);}
+ for(const granularity of ['week','month']){const view=defectBreakdown(analysis,{...scope,granularity},[],order);assert.equal(view.groups.length,1);assert.equal(view.groups[0].input,7);assert.equal(view.groups[0].count,2);}
 });
 test('exported complete hierarchies carry process ownership before the process level and reconcile global contributions',()=>{
  const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'};
- for(const first of ['defect','product','date']){const order=defectDimensions(first),levels=allDefectLevels(analysis,scope,order);for(const row of levels)if(row.defect)assert.equal(row.input,cohortInput(analysis,{...scope,...row,process:row.process||row.defectProcess}));const leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),2);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);}
- const roots=allDefectLevels(analysis,scope,defectDimensions('defect')).filter(row=>row.level==='defect');assert.deepEqual(roots.map(row=>[row.defectProcess,row.input]).sort(),[['P1',2],['P2',5]]);
+ for(const first of ['defect','product','date']){const order=defectDimensions(first),levels=allDefectLevels(analysis,scope,order);for(const row of levels)if(row.defect)assert.equal(row.input,cohortInput(analysis,{...scope,...row,process:row.process}));const leaves=levels.filter(row=>row.level===order.at(-1));assert.equal(leaves.reduce((sum,row)=>sum+row.count,0),2);assert.ok(Math.abs(leaves.reduce((sum,row)=>sum+row.contribution,0)-analysis.badRate)<1e-12);}
+ const roots=allDefectLevels(analysis,scope,defectDimensions('defect')).filter(row=>row.level==='defect');assert.deepEqual(roots.map(row=>[row.defect,row.input]),[['CG內異物',7]]);
 });
 
 test('top quality summary recalculates date-range PPID unions and scoped failures instead of fixed whole-file totals',()=>{

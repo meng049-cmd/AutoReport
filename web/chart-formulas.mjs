@@ -48,8 +48,8 @@ export function contributionFormulaDetails(analysis,view,scope){
   if(!details.open||loaded)return;loaded=true;
   text(details,`目前橫軸：${dimensionNames[view.dimension]}。全檔唯一投入 N全檔 = ${analysis.total}；這是全檔貢獻欄的固定母數；日期、製程與不良項目柱均用各自唯一投入，不引用全檔或選取區間合計作每根柱的母數。只計前段（DAF熱壓投入、DAF外觀、功能一測試）與後段（輝度機測試、功能二測試、外觀檢查點亮測試）；其他製程紀錄不計。`);
   details.append(table(['數字','公式','與其他數字的差異'],[
-   view.dimension==='date'?['本層長條高度（日期不良率）','R(日) = 當日首次歸屬唯一不良PPID ÷ 當日各納入製程投入PPID聯集大小','每根日期柱只用當天母數；同片跨製程只算1，不用全部選取日期總投入。週／月則只用該柱所屬週／月的唯一投入。']:view.dimension==='process'?['本層長條高度（製程不良率）','R(製程) = 歸屬該製程唯一不良PPID ÷ 同條件下該製程唯一投入PPID','各製程各用自身母數，包含良品及不良品；不用階段合計或其他製程投入。']:view.dimension==='defect'?['本層長條高度（製程內項目不良率）','R(製程,項目) = 此製程此項唯一不良PPID ÷ 同條件下此製程唯一投入PPID','按製程＋項目分組；同名跨製程分開。']:['本層長條高度（全檔不良率貢獻）','C(g) = 首次歸屬此群的不良PPID B(g) ÷ N全檔','產品全檔貢獻仍用固定全檔母數，其他層用各柱自身母數。'],
-   ['長條旁投入','N(g) = 符合日期／所屬製程／產品／工單範圍的 PPID 聯集大小','包含良品與不良品；不按不良項目縮小母數。'],
+   view.dimension==='date'?['本層長條高度（日期不良率）','R(日) = 當日首次歸屬唯一不良PPID ÷ 當日各納入製程投入PPID聯集大小','每根日期柱只用當天母數；同片跨製程只算1，不用全部選取日期總投入。週／月則只用該柱所屬週／月的唯一投入。']:view.dimension==='process'?['本層長條高度（製程不良率）','R(製程) = 歸屬該製程唯一不良PPID ÷ 同條件下該製程唯一投入PPID','各製程各用自身母數，包含良品及不良品；不用階段合計或其他製程投入。']:view.dimension==='defect'?['本層長條高度（不良項目歸屬不良率）','R(項目) = 首次歸屬此項的唯一不良PPID ÷ 目前篩選範圍的唯一投入PPID','同名不良項目跨製程合併；未篩選製程時，分母為納入製程PPID聯集，跨製程重複只算1片。已篩選製程時，分母採該製程投入。']:['本層長條高度（全檔不良率貢獻）','C(g) = 首次歸屬此群的不良PPID B(g) ÷ N全檔','產品全檔貢獻仍用固定全檔母數，其他層用各柱自身母數。'],
+   ['長條旁投入','N(g) = 符合日期／產品／工單及所選製程範圍的 PPID 聯集大小','包含良品與不良品；不按不良項目縮小母數。項目層未限定製程時跨製程去重。'],
    ['該群歸屬不良率','R(g) = B(g) ÷ N(g)',usesGroupInputRate(view.dimension)?'即本層長條值；各日期／製程母數不同，不直接相加百分比。':'只在群內計比例，與產品全檔貢獻不同。'],
    ['唯一 PPID 全檔總良率','Y全檔 = (N全檔 − 全檔唯一不良 PPID) ÷ N全檔','全檔每片只計一次；不是各日期／製程百分比的算術平均。'],
   ]));
@@ -59,6 +59,6 @@ export function contributionFormulaDetails(analysis,view,scope){
    details.dataset.inputAuditPass=String(selected.every(row=>row.consistent));
    details.append(table(['日期區間','製程投入合計','跨製程重複計入次數','PPID聯集唯一投入','圖上投入','驗算'],selected.map(row=>[row.label,row.processInputSum,row.repeatedInput,row.uniqueInput,row.input,row.consistent?'通過':'未吻合'])));
   }
-  details.append(table(['項目','首次歸屬不良PPID','該群唯一投入（項目為所屬製程）','該群歸屬不良率','全檔貢獻分母','全檔不良率貢獻（另列）'],view.groups.map(row=>[row.label,row.count,row.input,pct(row.rate),analysis.total,pct(row.contribution)])));
+  details.append(table(['項目','首次歸屬不良PPID',view.dimension==='defect'?'該群唯一投入（跨製程去重）':'該群唯一投入','該群歸屬不良率','全檔貢獻分母','全檔不良率貢獻（另列）'],view.groups.map(row=>[row.label,row.count,row.input,pct(row.rate),analysis.total,pct(row.contribution)])));
  });return details;
 }

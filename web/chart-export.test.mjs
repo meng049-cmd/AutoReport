@@ -37,5 +37,5 @@ test('stage chart workbook stores numeric results directly and retains its three
 });
 
 test('defect chart workbook computes plotted rates from its owning process input and bad PPID cells',async()=>{
- const rows=[{date:'CG內異物 · DAF外觀',value:.5},{date:'CG內異物 · 功能一測試',value:.2}],bytes=await createStageChartWorkbook({kind:'defect',title:'製程內不良項目不良率',sheetName:'不良率貢獻',target:0,color:'#d54545'},rows,{inputCounts:[2,5],badCounts:[1,1]}),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('不良率貢獻');assert.equal(sheet.getCell('D2').value,2);assert.equal(sheet.getCell('D3').value,5);assert.equal(sheet.getCell('E2').value,1);assert.equal(sheet.getCell('B2').value.formula,'IFERROR(E2/D2,"")');assert.equal(sheet.getCell('B2').value.result,.5);assert.equal(sheet.getCell('B3').value.result,.2);
+ const rows=[{date:'CG內異物',value:2/7}],bytes=await createStageChartWorkbook({kind:'defect',title:'不良項目歸屬不良率',sheetName:'不良率貢獻',target:0,color:'#d54545'},rows,{inputCounts:[7],badCounts:[2]}),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('不良率貢獻');assert.equal(sheet.getCell('D2').value,7);assert.equal(sheet.getCell('E2').value,2);assert.equal(sheet.getCell('B2').value.formula,'IFERROR(E2/D2,"")');assert.equal(sheet.getCell('B2').value.result,2/7);
 });
