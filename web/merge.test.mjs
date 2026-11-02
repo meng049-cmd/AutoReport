@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
+import {periodKey} from './defect-analysis.mjs';
 const context=vm.createContext({});
 vm.runInContext(readFileSync('vendor/xlsx.full.min.js','utf8'),context);
 vm.runInContext(readFileSync('merge-core.js','utf8'),context);
@@ -22,7 +23,7 @@ test('FAIL whole row wins; dates and processes remain separate',()=>{
   merger.add(book([row('A',5,'FAIL','defect'),row('A',5,'FAIL','later'),row('B',5,'GOOD')]),'second.xlsx');
   const result=merger.finish();
   assert.equal(result.input_rows,5);assert.equal(result.output_rows,3);assert.equal(result.removed_rows,2);
-  assert.equal(result.filename,'2026_w41_1005-1006.xlsx');
+  assert.equal(result.filename,'2026_w39_1005-1006.xlsx');
   const rows=XLSX.utils.sheet_to_json(result.book.Sheets.Detail,{header:1});
   assert.equal(rows[1][7],'defect');assert.equal(rows[1][8],'FAIL');
   assert.equal(result.book.SheetNames.join(','),'Detail');
@@ -68,4 +69,15 @@ test('strict errors remain default; test mode skips only bad rows and preserves 
  const merged=m.finish();assert.equal(merged.skipped_rows,2);assert.equal(merged.removed_rows,0);const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'saved.xlsx');assert.equal(again.skippedRows.length,2);assert.equal(again.skippedRows[0].filename,'errors.xlsx');assert.equal(again.finish().skipped_rows,2);
  assert.throws(()=>new DetailMerger(XLSX,{skipInvalidRows:true}).add({SheetNames:[]},'bad.xlsx'),/Detail/);
  const empty=new DetailMerger(XLSX,{skipInvalidRows:true});empty.add(book([invalid]),'invalid.xlsx');assert.throws(()=>empty.finish(),/已略過 1 列.*沒有可分析/);empty.add(book([row('P',6,'GOOD')]),'valid.xlsx');assert.equal(empty.finish().output_rows,1);
+});
+
+ test('download filenames match dashboard weeks at requested range and year boundaries',()=>{
+ for(const date of ['2026-10-25','2026-10-31','2026-11-01','2026-01-04','2026-01-11','2027-01-03']){
+  const entry=row('A',25,'GOOD');entry[5]=(Date.parse(date+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000;
+  const merger=new DetailMerger(XLSX);merger.add(book([entry]),'input.xlsx');
+  const [year,week]=periodKey(date,'week').split('-W'),day=date.slice(5).replace('-','');
+  assert.equal(merger.finish().filename,`${year}_w${Number(week)}_${day}-${day}.xlsx`);
+ }
+ const merger=new DetailMerger(XLSX);merger.add(book([row('A',25,'GOOD'),row('A',31,'GOOD')]),'input.xlsx');
+ assert.equal(merger.finish().filename,'2026_w42_1025-1031.xlsx');
 });

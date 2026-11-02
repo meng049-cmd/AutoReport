@@ -88,10 +88,11 @@
       if (!analysisOnly && this.rows.size > 1048575) throw new Error('合併結果超過 Excel 單一分頁的列數上限，請減少上傳檔案。');
       const XLSX = this.XLSX, rows = [...this.rows.values()].sort((a,b) => a.timestamp - b.timestamp);
       const first = rows[0].day, last = rows.at(-1).day;
-      const date = new Date(`${first}T00:00:00Z`);
-      date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
-      const year = date.getUTCFullYear();
-      const week = Math.ceil((((date - Date.UTC(year,0,1)) / 86400000) + 1) / 7);
+      // Same Sunday–Saturday reporting calendar as web/defect-analysis.mjs.
+      const dayMs=86400000,date=new Date(`${first}T00:00:00Z`),weekStart=+date-date.getUTCDay()*dayMs;
+      const yearStart=y=>{const jan11=Date.UTC(y,0,11);return jan11+((7-new Date(jan11).getUTCDay())%7)*dayMs;};
+      let year=date.getUTCFullYear();if(weekStart<yearStart(year))year--;
+      const week=Math.floor((weekStart-yearStart(year))/(7*dayMs))+1;
       const filename = `${year}_w${week}_${first.slice(5).replace('-','')}-${last.slice(5).replace('-','')}.xlsx`;
       const sheet = analysisOnly?null:XLSX.utils.aoa_to_sheet([this.header, ...rows.map(value => value.row)],{dense});
       for (let i = 1; sheet && i <= rows.length; i++) {
