@@ -27,13 +27,16 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
  if(type==='confirmCorrections'){
   if(!Array.isArray(file)||!file.length)throw Error('請先套用補填結果。');
   self.postMessage({id,progress:'正在儲存已確認的工單補填對照…'});
-  const py=await initialize();
-  py.FS.writeFile('/app/data/active.sqlite3',state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3'));
-  py.globals.set('corrections_json',JSON.stringify(file));
-  const corrections=JSON.parse(await py.runPythonAsync("import json\njson.dumps(update_database.save_corrections('/app/data/active.sqlite3',json.loads(corrections_json)),ensure_ascii=False)"));
-  const reference={...(state?.reference||JSON.parse(new TextDecoder().decode(await get('reference.json')))),manual_corrections:corrections};
-  const database=py.FS.readFile('/app/data/active.sqlite3').slice().buffer;
-  await saveBrowserDatabase({version:1,database,reference});
+  const current=state?.reference||JSON.parse(new TextDecoder().decode(await get('reference.json')));
+  const corrections=[...(current.manual_corrections||[])];
+  for(const item of file){
+   if(!item.order||!item.ic||!item.model)throw Error('補填資料缺少工單、IC 或機種，請重新套用結果。');
+   const part=item.part||'',index=corrections.findIndex(row=>row.order===item.order&&(row.part||'')===part);
+   const saved={order:item.order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
+   if(index>=0)corrections[index]=saved;else corrections.push(saved);
+  }
+  const reference={...current,manual_corrections:corrections};
+  await saveBrowserDatabase({version:1,database:state?.database||null,reference});
   self.postMessage({id,result:{reference,count:file.length}});return;
  }
  if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>100*1024*1024)throw Error('請選擇一份 100 MB 以內的 .xlsx 原始對照檔。');
