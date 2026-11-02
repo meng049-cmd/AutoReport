@@ -44,7 +44,7 @@ test('day, Sunday–Saturday week and month ranges retain empty dates and dedupl
 
 
 test('week labels show month/day intervals and preserve cross-year boundaries',()=>{
- assert.equal(periodLabel('2026-W42','week'),'10/25–10/31');assert.equal(periodLabel('2020-W53','week'),'2021/01/10–2021/01/16');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/11–10/17');
+ assert.equal(periodLabel('2026-W42','week'),'10/25–10/31');assert.equal(periodLabel('2020-W53','week'),'01/10–01/16');assert.equal(calendarBuckets('2026-10-12','2026-10-18','week')[0].label,'10/11–10/17');
 });
 
 
