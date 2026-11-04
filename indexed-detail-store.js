@@ -17,7 +17,15 @@ async function scan(key,period,visit){let from=[key,period?.start_date||'',0],ex
  for(;;){const batch=await tx('rows','readonly',s=>s.getAll(IDBKeyRange.bound(from,to,exclusive,false),2000));if(!batch.length)break;for(const row of batch)visit(row);const last=batch.at(-1);from=[key,last.day,last.seq];exclusive=true;}
 }
 async function removeForIds(ids,{keep=[]}={}){if(!root.indexedDB)return;const keys=await tx('files','readonly',s=>s.getAllKeys()),removed=new Set(ids);for(const key of keys){let id;try{id=JSON.parse(key)[1];}catch{}if(removed.has(id)&&!keep.includes(key))await reset(key);}}
+async function rekey(oldKey,newMeta){
+ const previous=await meta(oldKey);if(!previous?.complete||!newMeta?.key)return false;if(oldKey===newMeta.key){await putMeta(newMeta);return true;}
+ const db=await open();await new Promise((resolve,reject)=>{
+  const transaction=db.transaction(['files','rows'],'readwrite'),files=transaction.objectStore('files'),rows=transaction.objectStore('rows'),request=rows.openCursor(range(oldKey));
+  request.onsuccess=event=>{const cursor=event.target.result;if(!cursor){files.delete(oldKey);files.put(newMeta);return;}rows.put({...cursor.value,source:newMeta.key});cursor.delete();cursor.continue();};
+  request.onerror=()=>transaction.abort();transaction.oncomplete=resolve;transaction.onerror=transaction.onabort=()=>reject(transaction.error||Error('日期索引更新失敗。'));
+ });return true;
+}
 async function clear(){if(!root.indexedDB)return;await tx('files','readwrite',s=>s.clear());await tx('rows','readwrite',s=>s.clear());}
 async function prune(key){let id;try{id=JSON.parse(key)[1];}catch{return;}await removeForIds([id],{keep:[key]});}
-root.AutoReportDetailIndex={meta,reset,putRows,putMeta,scan,removeForIds,clear,prune};
+root.AutoReportDetailIndex={meta,reset,putRows,putMeta,scan,removeForIds,rekey,clear,prune};
 })(typeof self!=='undefined'?self:globalThis);

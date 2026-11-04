@@ -1,15 +1,18 @@
 import {navigate} from './navigation.mjs';
 import JSZip from 'jszip';
-import {libraryReady,libraryEvents,libraryCollection,listLibraryFiles,addLibraryFile,removeLibraryFiles,entryFile,entrySources,libraryIsBusy,beginFileOperation,endFileOperation} from './file-library.mjs';
+import {libraryReady,libraryEvents,libraryCollection,listLibraryFiles,addLibraryFile,replaceLibraryFile,removeLibraryFiles,entryFile,entrySources,libraryIsBusy,beginFileOperation,endFileOperation} from './file-library.mjs';
 import {analyzeYieldFiles,getYieldOptions} from './yield-ui.mjs';
 import {indexDetailFiles,existingIndex,indexKey,periods} from './detail-index.mjs';
 const $=id=>document.getElementById(id),urls=new Map(),states={raw:{selected:new Set(),search:'',kind:'',page:0,purpose:''},detail:{selected:new Set(),search:'',kind:'',page:0,purpose:''},mergedDetail:{selected:new Set(),search:'',kind:'',page:0,purpose:''},analysis:{selected:new Set(),search:'',kind:'analysis',page:0,purpose:''}};
 let active='detail',selected=states.detail.selected;
 const kindNames={raw:'比對前原始檔',matched:'比對完成',merged:'舊版合併 Detail',analysis:'良率與不良分析',input:'上傳主檔'};
-let page=0,periodScope=null,indexController;let refreshingLibraryMetadata=false;const periodMetas=new Map(),periodOptions=new Map();
+let page=0,periodScope=null,indexController,compactWorker,compactSequence=0,compactPreview=null;let refreshingLibraryMetadata=false;const periodMetas=new Map(),periodOptions=new Map(),compactPending=new Map();
 function visibleFiles(){const query=$('librarySearch').value.trim().normalize('NFKC').toLowerCase(),kind=$('libraryKind').value;return listLibraryFiles().filter(item=>libraryCollection(item)===active&&(!periodScope||periods.rowsIn(periodMetas.get(item.id)||{},periodScope)>0)&&(!kind||item.kind===kind)&&(!query||item.name.normalize('NFKC').toLowerCase().includes(query)));}
 function selection(){const entries=new Map(listLibraryFiles().map(item=>[item.id,item]));return [...selected].map(id=>entries.get(id)).filter(item=>item&&libraryCollection(item)===active);}
-function updateActions(){updatePeriodStatus();const items=selection(),detail=!libraryIsBusy()&&items.length&&items.every(item=>item.detail),mergeScope=['detail','mergedDetail'].includes(active);$('libraryMatch').disabled=libraryIsBusy()||!items.length||active!=='raw';$('libraryAnalyze').disabled=!detail||active==='raw'||Boolean(periodScope&&periodEntries().some(item=>!periodMetas.has(item.id))); $('libraryMerge').hidden=true;$('libraryMerge').textContent=active==='mergedDetail'?'再次合併所選 Detail':'合併所選 Detail';$('libraryMerge').disabled=libraryIsBusy()||!detail||!mergeScope;$('libraryPpidLookup').disabled=libraryIsBusy()||active==='raw'||!items.length||!items.every(item=>active==='analysis'?item.kind==='analysis'&&item.detail:item.detail);$('libraryDownload').disabled=libraryIsBusy()||!items.length;$('libraryRemove').disabled=libraryIsBusy()||!items.length;$('librarySelected').textContent='已勾選 '+items.length+' 份';const visible=visibleFiles(),marked=visible.filter(item=>selected.has(item.id)).length,header=$('librarySelectVisible');if(header){header.checked=visible.length>0&&marked===visible.length;header.indeterminate=marked>0&&marked<visible.length;header.disabled=libraryIsBusy()||!visible.length;}$('librarySelectAll').disabled=libraryIsBusy()||!visible.length;$('libraryClearSelection').disabled=libraryIsBusy()||!items.length;const incompatible=active!=='raw'&&items.some(item=>!item.detail);if(incompatible)$('libraryPurpose').textContent='分析請選擇含 Detail 分頁的檔案。';else if($('libraryPurpose').textContent==='分析請選擇含 Detail 分頁的檔案。')$('libraryPurpose').textContent='';}
+function detailLibraryItems(){return listLibraryFiles().filter(item=>libraryCollection(item)==='detail'&&item.detail);}
+function compactFingerprint(items=detailLibraryItems()){return JSON.stringify(items.map(item=>[item.id,item.blob?.size??item.size,item.lastModified||0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));}
+function updateCompactActions(){const items=detailLibraryItems(),current=compactPreview?.fingerprint===compactFingerprint(items);$('libraryCompactControls').hidden=active!=='detail';$('libraryCompactHint').hidden=active!=='detail';$('libraryCompactPreview').disabled=libraryIsBusy()||!items.length;$('libraryCompactApply').disabled=libraryIsBusy()||!current||!compactPreview?.removedRows||compactPreview.failures.length>0;}
+function updateActions(){updatePeriodStatus();const items=selection(),detail=!libraryIsBusy()&&items.length&&items.every(item=>item.detail),mergeScope=['detail','mergedDetail'].includes(active);$('libraryMatch').disabled=libraryIsBusy()||!items.length||active!=='raw';$('libraryAnalyze').disabled=!detail||active==='raw'||Boolean(periodScope&&periodEntries().some(item=>!periodMetas.has(item.id))); $('libraryMerge').hidden=true;$('libraryMerge').textContent=active==='mergedDetail'?'再次合併所選 Detail':'合併所選 Detail';$('libraryMerge').disabled=libraryIsBusy()||!detail||!mergeScope;$('libraryPpidLookup').disabled=libraryIsBusy()||active==='raw'||!items.length||!items.every(item=>active==='analysis'?item.kind==='analysis'&&item.detail:item.detail);$('libraryDownload').disabled=libraryIsBusy()||!items.length;$('libraryRemove').disabled=libraryIsBusy()||!items.length;$('librarySelected').textContent='已勾選 '+items.length+' 份';const visible=visibleFiles(),marked=visible.filter(item=>selected.has(item.id)).length,header=$('librarySelectVisible');if(header){header.checked=visible.length>0&&marked===visible.length;header.indeterminate=marked>0&&marked<visible.length;header.disabled=libraryIsBusy()||!visible.length;}$('librarySelectAll').disabled=libraryIsBusy()||!visible.length;$('libraryClearSelection').disabled=libraryIsBusy()||!items.length;const incompatible=active!=='raw'&&items.some(item=>!item.detail);if(incompatible)$('libraryPurpose').textContent='分析請選擇含 Detail 分頁的檔案。';else if($('libraryPurpose').textContent==='分析請選擇含 Detail 分頁的檔案。')$('libraryPurpose').textContent='';updateCompactActions();}
 function render(){
  const all=listLibraryFiles();for(const item of all)if(periodMetas.has(item.id)&&periodMetas.get(item.id).key!==indexKey(entryFile(item),item.id))periodMetas.delete(item.id);const known=new Set(all.map(item=>item.id));for(const [id,url] of urls)if(!known.has(id)){URL.revokeObjectURL(url);urls.delete(id);}for(const id of selected)if(!known.has(id))selected.delete(id);
  const items=visibleFiles(),pages=Math.max(1,Math.ceil(items.length/20));page=Math.min(page,pages-1);$('libraryCount').textContent=all.filter(item=>libraryCollection(item)===active).length+' 份檔案';$('libraryPrev').disabled=page===0;$('libraryNext').disabled=page===pages-1;$('libraryPage').textContent=(page+1)+' / '+pages;
@@ -25,6 +28,53 @@ async function deleteFiles(ids){if(!ids.length||!beginFileOperation())return;try
 $('librarySelectAll').onclick=()=>{selectFiltered(true);render();};
 $('libraryClearSelection').onclick=()=>{selected.clear();render();};
 $('libraryRemove').onclick=()=>deleteFiles(selection().map(item=>item.id));
+function requestDetailCompaction(file,mode){
+ if(!compactWorker){compactWorker=new Worker(new URL('../detail-compaction-worker.js?v='+__BUILD_ID__,import.meta.url));compactWorker.onmessage=({data})=>{const pending=compactPending.get(data.id);if(!pending)return;if(data.type==='progress'){pending.onProgress?.(data.message);return;}compactPending.delete(data.id);data.type==='error'?pending.reject(Error(data.message)):pending.resolve(data);};compactWorker.onerror=()=>{for(const pending of compactPending.values())pending.reject(Error('Detail 精簡工作程式中斷；尚未寫入的檔案保持不變。'));compactPending.clear();compactWorker.terminate();compactWorker=null;};}
+ const id=++compactSequence;return new Promise((resolve,reject)=>{compactPending.set(id,{resolve,reject});compactWorker.postMessage({id,file,mode});});
+}
+function readableBytes(value){const units=['B','KB','MB','GB'];let size=Math.max(0,Number(value)||0),unit=0;while(size>=1024&&unit<units.length-1){size/=1024;unit++;}return `${size.toFixed(unit?1:0)} ${units[unit]}`;}
+async function previewDetailCompaction(){
+ const items=detailLibraryItems();if(!items.length){$('libraryCompactStatus').textContent='Detail 檔案庫目前沒有可精簡的檔案。';return;}if(!beginFileOperation())return;
+ const fingerprint=compactFingerprint(items),results=[],failures=[];
+ try{
+  for(let i=0;i<items.length;i++){
+   const item=items[i];$('libraryCompactStatus').textContent=`正在掃描 ${i+1}/${items.length}：${item.name}`;
+   if(!item.persistent){failures.push(`${item.name}：未儲存在本機資料庫。`);continue;}
+   try{results.push({...await requestDetailCompaction(entryFile(item),'preview'),id:item.id});}catch(error){failures.push(`${item.name}：${error.message}`);}
+  }
+ }finally{endFileOperation();}
+ if(compactFingerprint()!==fingerprint){compactPreview=null;$('libraryCompactStatus').textContent='掃描期間檔案庫有變動，請重新掃描。';updateActions();return;}
+ const removedRows=results.reduce((sum,item)=>sum+item.removedRows,0),keptRows=results.reduce((sum,item)=>sum+item.keptRows,0),beforeSize=results.reduce((sum,item)=>sum+item.beforeSize,0),afterSize=results.reduce((sum,item)=>sum+item.afterSize,0);
+ compactPreview={fingerprint,results,failures,removedRows,keptRows,beforeSize,afterSize};
+ if(failures.length){$('libraryCompactStatus').textContent=`已掃描 ${items.length} 份，保留 ${keptRows.toLocaleString()} 筆六製程、預計移除 ${removedRows.toLocaleString()} 筆其他製程；${failures.length} 份無法安全處理，確認按鈕已停用。${failures.slice(0,4).join('；')}`;}
+ else if(!removedRows){$('libraryCompactStatus').textContent=`已掃描 ${items.length} 份：所有資料均屬六製程，無需精簡。`;}
+ else{$('libraryCompactStatus').textContent=`預覽 ${items.length} 份：保留 ${keptRows.toLocaleString()} 筆六製程、移除 ${removedRows.toLocaleString()} 筆其他製程；檔案庫容量約 ${readableBytes(beforeSize)} → ${readableBytes(afterSize)}。這只縮小本機檔案，不會提高 30 萬筆分析上限（索引已只取六製程）。`;
+ }
+ updateActions();
+}
+async function compactDetailLibrary(){
+ const preview=compactPreview,items=detailLibraryItems();if(!preview||preview.failures.length||preview.fingerprint!==compactFingerprint(items)){compactPreview=null;$('libraryCompactStatus').textContent='檔案庫已變動或預覽無法使用，請重新掃描。';updateActions();return;}
+ const targets=preview.results.filter(item=>item.removedRows>0);if(!targets.length)return;
+ const estimate=preview.beforeSize-preview.afterSize,estimateText=estimate>=0?`預估釋放 ${readableBytes(estimate)}`:`預估檔案大小增加 ${readableBytes(-estimate)}`;
+ const confirmed=confirm(`將在此瀏覽器的本機 Detail 資料庫中，覆寫 ${targets.length} 份檔案並永久移除 ${preview.removedRows.toLocaleString()} 筆非六製程資料，保留 ${preview.keptRows.toLocaleString()} 筆六製程資料。${estimateText}。其他工作表與 Raw Data 原始檔不變；不會上傳雲端。此操作無法從 Detail 檔案庫復原，建議先下載備份。確定執行？`);
+ if(!confirmed)return;if(!beginFileOperation())return;compactPreview=null;
+ let changedFiles=0,removedRows=0,keptRows=0,savedBytes=0,indexesPreserved=0;const failures=[];
+ try{
+  for(let i=0;i<targets.length;i++){
+   const expected=targets[i],item=listLibraryFiles().find(file=>file.id===expected.id);if(!item){failures.push(`${expected.name}：檔案已不存在。`);continue;}
+   $('libraryCompactStatus').textContent=`正在精簡 ${i+1}/${targets.length}：${item.name}`;
+   try{
+    const output=await requestDetailCompaction(entryFile(item),'compact');
+    if(output.removedRows!==expected.removedRows||output.keptRows!==expected.keptRows||!output.bytes)throw Error('掃描結果與預覽不一致；此檔案未更新。');
+    const blob=new Blob([output.bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),updated=await replaceLibraryFile(item.id,blob);
+    changedFiles++;removedRows+=output.removedRows;keptRows+=output.keptRows;savedBytes+=output.beforeSize-output.afterSize;if(updated.indexPreserved)indexesPreserved++;
+   }catch(error){failures.push(`${item.name}：${error.message}`);}
+  }
+ }finally{endFileOperation();}
+ const result=`本機精簡完成：更新 ${changedFiles} 份 Detail，移除 ${removedRows.toLocaleString()} 筆非六製程資料，保留 ${keptRows.toLocaleString()} 筆六製程資料；${savedBytes>=0?'減少':'增加'} ${readableBytes(Math.abs(savedBytes))}。${indexesPreserved} 份日期索引直接沿用。`;
+ $('libraryCompactStatus').textContent=result+(failures.length?` ${failures.length} 份未更新：${failures.slice(0,4).join('；')}`:'')+' 不會提高 30 萬筆分析上限，因為分析索引本來就只計六製程。';updateActions();
+}
+$('libraryCompactPreview').onclick=previewDetailCompaction;$('libraryCompactApply').onclick=compactDetailLibrary;
 function openReports(){navigate('reports');$('libraryKind').value='analysis';$('librarySearch').value='';page=0;render();}
 $('viewYieldFiles').onclick=openReports;window.addEventListener('library-reports',openReports);
 $('viewRawFiles').onclick=()=>navigate('raw');
@@ -33,7 +83,7 @@ $('viewMatchedFiles').onclick=()=>{navigate('files');$('libraryKind').value='mat
 $('libraryAnalyze').onclick=()=>{const items=selection();if(periodScope&&periodEntries().some(item=>periodMetas.get(item.id)?.invalidRows)&&!getYieldOptions().skipInvalidRows){$('libraryPurpose').textContent='日期索引發現錯誤列，部分資料無法歸入日／週／月。請修正來源並重新匯入；如要略過，請先在每日良率分析啟用「略過錯誤列」後再分析。';return;}navigate('yield');analyzeYieldFiles(items.map(entryFile),{sources:entrySources(items),fromLibrary:true,fileIds:items.map(item=>item.id),period:periodScope});};
 $('libraryPpidLookup').onclick=()=>{const items=selection().filter(item=>active==='analysis'?item.kind==='analysis'&&item.detail:item.detail);if(!items.length)return;window.dispatchEvent(new CustomEvent('ppid-lookup-files',{detail:{ids:items.map(item=>item.id),collection:active}}));};
 $('libraryDownload').onclick=async()=>{const items=selection();if(!items.length)return;const button=$('libraryDownload');button.disabled=true;try{const zip=new JSZip(),used=new Set();for(const item of items){let name=item.name,index=2;const dot=item.name.lastIndexOf('.'),base=dot>0?item.name.slice(0,dot):item.name,extension=dot>0?item.name.slice(dot):'';while(used.has(name.toLowerCase()))name=base+'_'+index+++extension;used.add(name.toLowerCase());zip.file(name,item.blob);}const url=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'})),link=document.createElement('a');link.href=url;link.download='AutoReport_檔案清單.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}catch(error){$('libraryPurpose').textContent=error.message;}finally{updateActions();}};
-libraryEvents.addEventListener('change',()=>{render();void refreshPeriodMetadata();});libraryReady.then(render);
+libraryEvents.addEventListener('change',event=>{if(event.detail?.type==='files')compactPreview=null;render();void refreshPeriodMetadata();});libraryReady.then(render);
 
 window.addEventListener('library-choose-ppid',({detail})=>{const collection=['analysis','mergedDetail'].includes(detail?.collection)?detail.collection:'detail';const route=collection==='analysis'?'reports':collection==='mergedDetail'?'mergedDetail':'files';navigate(route);$('libraryKind').value=collection==='analysis'?'analysis':collection==='mergedDetail'?'merged':'';$('librarySearch').value='';page=0;render();$('libraryPurpose').textContent=`勾選${collection==='analysis'?'分析報表':collection==='mergedDetail'?'合併 Detail':'Detail 比對'}檔案後，點「帶入 PPID 查找」；查找只掃描所選檔案庫。`;$('fileLibrary').scrollIntoView({behavior:'smooth',block:'start'});});
 window.addEventListener('library-open-ppid-file',({detail:{id}})=>{
