@@ -83,8 +83,29 @@
       for(const key of defectKeys)this.defectKeys.add(key);
     }
     hasDefect(value) {return this.defectKeys.has(value.key||JSON.stringify([value.day,String(value.row[0]).trim(),String(value.row[4]).trim()]));}
-    finish({dense=false,analysisOnly=false,selectedRows,includeSkippedRows=true}={}) {
+    prepareIndexed(meta,period){
+      const header=meta.header;
+      if(this.header&&JSON.stringify(header)!==JSON.stringify(this.header))throw Error(`${meta.name}：Detail 欄位標題與順序不一致。`);
+      if(!this.header){this.header=header;this.time=header.indexOf('產出時間');this.status=header.indexOf('狀態');}
+      for(const name of meta.sources||[meta.name])this.sources.add(name);
+      const inside=r=>!period||(r.date>=period.start_date&&r.date<=period.end_date);
+      this.indexedEvidence=[new Map(),new Map()];
+      for(const [records,target] of [[meta.firstNG,this.indexedEvidence[0]],[meta.analysisFirstNG,this.indexedEvidence[1]]])for(const r of records||[])if(inside(r))target.set(r.serial,{...r,indexedSequence:-Infinity});
+      if(meta.skippedRows?.length){if(!this.skipInvalidRows){const r=meta.skippedRows[0];throw Error(`${r.filename} 第 ${r.row} 列：${r.reason}。`);}for(const r of meta.skippedRows)this.skippedRows.push(r);}
+    }
+    addIndexed(value){
+      const status=normalizeDetailStatus(value.row[this.status]),serial=String(value.row[4]).trim(),old=this.rows.get(value.key);
+      if(!old||(status==='FAIL'&&normalizeDetailStatus(old.row[this.status])!=='FAIL'))this.rows.set(value.key,{row:value.row,day:value.day,timestamp:value.timestamp,key:value.key});
+      if(value.fail)this.defectKeys.add(value.key);
+      const ng=ngRecord(value.row,value,this.status);
+      if(ng){ng.indexedSequence=value.seq;for(const target of isAnalysisProcess(ng.process)?this.indexedEvidence:[this.indexedEvidence[0]]){const old=target.get(serial);if(preferNG(ng,old)||(old?.status===ng.status&&ng.indexedSequence<old.indexedSequence))target.set(serial,ng);}}
+      this.total++;
+    }
+    completeIndexed(){for(const [local,target] of [[this.indexedEvidence[0],this.firstNG],[this.indexedEvidence[1],this.analysisFirstNG]])for(const [serial,ng] of local)if(preferNG(ng,target.get(serial)))target.set(serial,ng);this.indexedEvidence=null;}
+    finish({dense=false,analysisOnly=false,selectedRows,includeSkippedRows=true,summaryOnly=false}={}) {
       if (!this.rows.size) throw new Error(this.skippedRows.length?`已略過 ${this.skippedRows.length} 列錯誤資料，Detail 沒有可分析的有效資料。`:'Detail 沒有可合併的資料。');
+      if(!analysisOnly&&!selectedRows&&this.rows.size>1048575)throw Error('合併分檔超過 Excel 單一分頁列數上限。');
+      if(summaryOnly){let first='9999',last='';for(const value of this.rows.values()){if(value.day<first)first=value.day;if(value.day>last)last=value.day;}const book=this.XLSX.utils.book_new();book.Custprops={};return {book,filename:`${first}-${last}.xlsx`,input_rows:this.total,output_rows:this.rows.size,removed_rows:this.total-this.rows.size,skipped_rows:this.skippedRows.length,start_date:first,end_date:last};}
       const XLSX = this.XLSX, rows = [...(selectedRows||this.rows.values())].sort((a,b) => a.timestamp - b.timestamp);
       if(!rows.length)throw new Error('此日期區間沒有可合併的 Detail 資料。');
       if (!analysisOnly && rows.length > 1048575) throw new Error('合併分檔超過 Excel 單一分頁列數上限，請稍後重試。');

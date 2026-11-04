@@ -6,14 +6,14 @@ function canonical(value){
  const aliases={'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測試':'功能一測試','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮測試':'外觀檢查點亮測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測試':'輝度機測試','輝度機測':'輝度機測試'};
  return aliases[name]||name;
 }
-function buildYieldReport(merger,identities){
- const XLSX=merger.XLSX,counts=new Map(),products=new Map(),processes=new Set(preferred),pendingRows=[];
+function buildYieldReport(merger,identities,{includeDetail=true,period=null}={}){
+ const XLSX=merger.XLSX,counts=new Map(),products=new Map(),processes=new Set(preferred),pendingRows=[],pendingGroups=new Map();let missingProductRows=0;
  if(merger.time!==5)throw Error('主檔 F 欄須為產出時間。');
  if(merger.header?.[9]!=='IC'||merger.header?.[10]!=='機種')throw Error('主檔 J 欄須為 IC、K 欄須為機種，請先完成比對。');
  for(const value of merger.rows.values()){
   if(!root.isAnalysisProcess(value.row[0]))continue;
   const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=String(row[10]??'').trim(),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
-  const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel)pendingRows.push(row);
+  const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel){missingProductRows++;if(includeDetail)pendingRows.push(row);else{const key=JSON.stringify([row[1],row[2],rawIC,rawModel]),group=pendingGroups.get(key)||[row[1],row[2],rawIC,rawModel,0];group[4]++;pendingGroups.set(key,group);}}
   const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
   products.set(product,{ic:ic||'【待補 IC】',model:model||'【待補機種】',incomplete});processes.add(process);
   const count=counts.get(key)||{product,ic,model,day:value.day,process,good:0,fail:0,units:new Map()};
@@ -22,7 +22,8 @@ function buildYieldReport(merger,identities){
  }
  for(const count of counts.values()){count.fail=[...count.units.values()].filter(Boolean).length;count.good=count.units.size-count.fail;}
  const stageComparisons=[['日期','IC','機種','階段','採用：AGGREGATE製程平均良率','唯一PPID良率（比較）','良率差異（平均減唯一，百分點）','唯一投入PPID','唯一不良PPID','唯一PPID不良率','有資料製程數']],stageChecks=[],stageDetails=[['日期','IC','機種','階段','唯一良品PPID','唯一不良PPID','唯一投入PPID','良率','不良率']];
- const merged=merger.finish({dense:true,analysisOnly:true}),dates=[];
+ const merged=merger.finish({dense:true,analysisOnly:true,summaryOnly:!includeDetail}),dates=[];
+ if(period){merged.start_date=period.start_date;merged.end_date=period.end_date;}
  for(let time=Date.parse(merged.start_date+'T00:00:00Z');time<=Date.parse(merged.end_date+'T00:00:00Z');time+=86400000)dates.push(new Date(time).toISOString().slice(0,10));
  if(dates.length>16383)throw Error('日期範圍超過 Excel 欄數上限，請縮小主檔範圍。');
  const details=[['日期','IC','機種','製程','良品數量','不良數量','總數','良率','不良率']],indices=new Map();
@@ -73,10 +74,11 @@ function buildYieldReport(merger,identities){
  const comparisonSheet=XLSX.utils.aoa_to_sheet(stageComparisons);for(let r=2;r<=stageComparisons.length;r++){for(const col of ['E','F','J'])if(comparisonSheet[col+r])comparisonSheet[col+r].z='0.00%';comparisonSheet['G'+r]={t:stageComparisons[r-1][6]==null?'s':'n',v:stageComparisons[r-1][6]??'',f:`IF(OR(E${r}="",F${r}=""),"",(E${r}-F${r})*100)`,z:'0.0000'};}comparisonSheet['!cols']=stageComparisons[0].map(()=>({wch:25}));XLSX.utils.book_append_sheet(book,comparisonSheet,'階段良率比較');
  XLSX.utils.book_append_sheet(book,stageDetailSheet,'階段計算明細');
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
- const detailRows=[...merger.rows.values()].sort((a,b)=>a.timestamp-b.timestamp);for(let offset=0,part=1;offset<detailRows.length;offset+=1048575,part++){const sheet=XLSX.utils.aoa_to_sheet([merger.header,...detailRows.slice(offset,offset+1048575).map(value=>value.row)],{dense:true});for(let r=1;r<sheet.length;r++)if(sheet[r]?.[merger.time])sheet[r][merger.time].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,part===1?'Detail':'Detail_'+part);}
+ if(includeDetail){const detailRows=[...merger.rows.values()].sort((a,b)=>a.timestamp-b.timestamp);for(let offset=0,part=1;offset<detailRows.length;offset+=1048575,part++){const sheet=XLSX.utils.aoa_to_sheet([merger.header,...detailRows.slice(offset,offset+1048575).map(value=>value.row)],{dense:true});for(let r=1;r<sheet.length;r++)if(sheet[r]?.[merger.time])sheet[r][merger.time].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,part===1?'Detail':'Detail_'+part);}}
  if(pendingRows.length){const pending=XLSX.utils.aoa_to_sheet([merger.header,...pendingRows]);for(let r=2;r<=pendingRows.length+1;r++)if(pending['F'+r])pending['F'+r].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,pending,'待補產品資料');}
+ if(pendingGroups.size)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['工單','料號','IC','機種','筆數'],...pendingGroups.values()]),'待補產品彙總');
  book.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true}};
- return {book,calculation:{stageChecks,dailyCounts:[...counts.values()].map(({units,...count})=>count)},filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:pendingRows.length,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
+ return {book,calculation:{stageChecks,dailyCounts:[...counts.values()].map(({units,...count})=>count)},filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:missingProductRows,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
 }
 root.buildYieldReport=buildYieldReport;root.canonicalProcess=canonical;
 })(typeof self!=='undefined'?self:globalThis);

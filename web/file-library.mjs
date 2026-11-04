@@ -1,4 +1,5 @@
 import {removeAnalysisCaches,clearAnalysisCaches} from './analysis-cache.mjs';
+import '../indexed-detail-store.js';
 const entries=new Map();
 export const libraryEvents=new EventTarget();
 let db,operationBusy=false;
@@ -20,7 +21,7 @@ export async function addLibraryFile(file,{kind='matched',detail=true,sources=[]
  try{await write('readwrite',store=>store.put(entry));}catch{entry.persistent=false;}
  entries.set(entry.id,entry);if(previous)await removeAnalysisCaches([entry.id]);changed();return entry;
 }
-export async function removeLibraryFiles(ids){await libraryReady;if(db)await write('readwrite',store=>ids.forEach(id=>store.delete(id)));else if(ids.some(id=>entries.get(id)?.persistent))throw Error('檔案清單連線已更新，請重新整理後再移除。');ids.forEach(id=>entries.delete(id));await removeAnalysisCaches(ids);changed();}
-export async function clearFileLibrary(){await libraryReady;if(db)await write('readwrite',store=>store.clear());else if([...entries.values()].some(item=>item.persistent))throw Error('檔案清單連線已更新，請重新整理後再清空。');entries.clear();await clearAnalysisCaches();changed();}
+export async function removeLibraryFiles(ids){await libraryReady;if(db)await write('readwrite',store=>ids.forEach(id=>store.delete(id)));else if(ids.some(id=>entries.get(id)?.persistent))throw Error('檔案清單連線已更新，請重新整理後再移除。');ids.forEach(id=>entries.delete(id));await removeAnalysisCaches(ids);await globalThis.AutoReportDetailIndex.removeForIds(ids).catch(()=>{});changed();}
+export async function clearFileLibrary(){await libraryReady;if(db)await write('readwrite',store=>store.clear());else if([...entries.values()].some(item=>item.persistent))throw Error('檔案清單連線已更新，請重新整理後再清空。');entries.clear();await clearAnalysisCaches();await globalThis.AutoReportDetailIndex.clear().catch(()=>{});changed();}
 export function entryFile(entry){return new File([entry.blob],entry.name,{type:entry.blob.type||(/\.csv$/i.test(entry.name)?'text/csv':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),lastModified:entry.lastModified??entry.blob.lastModified??new Date(entry.createdAt).getTime()});}
 export function entrySources(items){const map=new Map();for(const item of items)for(const source of item.sources?.length?item.sources:[{name:item.name,size:item.size,kind:'Detail'}])if(!map.has(source.name))map.set(source.name,source);return [...map.values()];}

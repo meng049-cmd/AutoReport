@@ -1,43 +1,18 @@
 const version=new URL(self.location.href).search;
-importScripts('vendor/xlsx.full.min.js'+version, 'merge-core.js'+version);
+importScripts('vendor/xlsx.full.min.js'+version, 'merge-core.js'+version,'period-core.js'+version);
 
 const MAX_OUTPUT_BYTES=100*1024*1024;
-const TARGET_ESTIMATED_BYTES=24*1024*1024;
+const MAX_ROWS_PER_PART=100000;
 let acknowledgeOutput=null;
-
-function waitForOutputSave(){
-  return new Promise(resolve=>{acknowledgeOutput=resolve;});
-}
-
-function estimateRowBytes(value){
-  return Math.max(256,JSON.stringify(value.row).length*3+128);
-}
-
+function waitForOutputSave(){return new Promise(resolve=>{acknowledgeOutput=resolve;});}
 function partitionRows(rows){
-  const ranges=[];
-  let start=0,estimated=0;
-  for(let i=0;i<rows.length;){
-    const day=rows[i].day;
-    let end=i+1,dayEstimate=estimateRowBytes(rows[i]);
-    while(end<rows.length&&rows[end].day===day){dayEstimate+=estimateRowBytes(rows[end]);end++;}
-    if(dayEstimate>TARGET_ESTIMATED_BYTES){
-      if(start<i)ranges.push([start,i]);
-      let subStart=i,subEstimate=0;
-      for(let j=i;j<end;j++){
-        const rowEstimate=estimateRowBytes(rows[j]);
-        if(j>subStart&&subEstimate+rowEstimate>TARGET_ESTIMATED_BYTES){ranges.push([subStart,j]);subStart=j;subEstimate=0;}
-        subEstimate+=rowEstimate;
-      }
-      if(subStart<end)ranges.push([subStart,end]);
-      start=end;estimated=0;
-    }else{
-      if(i>start&&estimated+dayEstimate>TARGET_ESTIMATED_BYTES){ranges.push([start,i]);start=i;estimated=0;}
-      estimated+=dayEstimate;
-    }
-    i=end;
-  }
-  if(start<rows.length)ranges.push([start,rows.length]);
-  return ranges;
+ const ranges=[];let start=0,currentWeek;
+ for(let i=0;i<rows.length;i++){
+  const week=AutoReportPeriods.periodFor(rows[i].day,'week').key;
+  if(i>start&&(week!==currentWeek||i-start>=MAX_ROWS_PER_PART)){ranges.push([start,i]);start=i;}
+  currentWeek=week;
+ }
+ if(start<rows.length)ranges.push([start,rows.length]);return ranges;
 }
 
 function arrayBufferOf(bytes){

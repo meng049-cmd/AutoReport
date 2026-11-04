@@ -15,3 +15,12 @@ test('completed analysis cache respects ordered immutable file IDs, skip mode an
 test('legacy library entries retain their files while analysis inputs and reports are separated from Detail outputs',()=>{
  assert.equal(libraryCollection({kind:'raw'}),'raw');assert.equal(libraryCollection({kind:'raw',collection:'raw'}),'raw');assert.equal(libraryCollection({kind:'matched'}),'detail');assert.equal(libraryCollection({kind:'matched',detail:false}),'detail');assert.equal(libraryCollection({kind:'merged'}),'detail');assert.equal(libraryCollection({kind:'input'}),'analysis');assert.equal(libraryCollection({kind:'analysis'}),'analysis');assert.equal(libraryCollection({kind:'merged',collection:'analysis'}),'analysis');assert.equal(libraryCollection({kind:'analysis',collection:'unknown'}),'analysis');
 });
+
+test('week/month selections have distinct cache keys and completed summary reports remain readable after a calculation update',async()=>{
+ globalThis.__ANALYSIS_VERSION__='period-v1';await clearAnalysisCaches();
+ const sources=[{name:'source.xlsx'}],week={mode:'week',start_date:'2026-10-25',end_date:'2026-10-31'},month={mode:'month',start_date:'2026-10-01',end_date:'2026-10-31'};
+ const weekKey=analysisSelectionKey(['source'],{period:week},sources,[]),monthKey=analysisSelectionKey(['source'],{period:month},sources,[]);assert.notEqual(weekKey,monthKey);
+ await saveAnalysisCache('summary',{includes_detail:false,analysis:{total:42},bytes:new ArrayBuffer(1)},{selectionKey:weekKey});
+ globalThis.__ANALYSIS_VERSION__='period-v2';assert.equal(await getAnalysisCache({selectionKey:weekKey}),null);assert.equal((await getAnalysisCache({reportId:'summary'})).data.analysis.total,42);
+ await clearAnalysisCaches();
+});

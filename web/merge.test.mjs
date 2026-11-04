@@ -23,7 +23,7 @@ test('FAIL whole row wins; dates and processes remain separate',()=>{
   merger.add(book([row('A',5,'FAIL','defect'),row('A',5,'FAIL','later'),row('B',5,'GOOD')]),'second.xlsx');
   const result=merger.finish();
   assert.equal(result.input_rows,5);assert.equal(result.output_rows,3);assert.equal(result.removed_rows,2);
-  assert.equal(result.filename,'2026_w39_1005-1006.xlsx');
+  assert.equal(result.filename,'2026_w39_2026-10-05-2026-10-06.xlsx');
   const rows=XLSX.utils.sheet_to_json(result.book.Sheets.Detail,{header:1});
   assert.equal(rows[1][7],'defect');assert.equal(rows[1][8],'FAIL');
   assert.equal(result.book.SheetNames.join(','),'Detail');
@@ -76,8 +76,8 @@ test('strict errors remain default; test mode skips only bad rows and preserves 
   const entry=row('A',25,'GOOD');entry[5]=(Date.parse(date+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000;
   const merger=new DetailMerger(XLSX);merger.add(book([entry]),'input.xlsx');
   const [year,week]=periodKey(date,'week').split('-W'),day=date.slice(5).replace('-','');
-  assert.equal(merger.finish().filename,`${year}_w${Number(week)}_${day}-${day}.xlsx`);
+  assert.equal(merger.finish().filename,`${year}_w${Number(week)}_${date}-${date}.xlsx`);
  }
  const merger=new DetailMerger(XLSX);merger.add(book([row('A',25,'GOOD'),row('A',31,'GOOD')]),'input.xlsx');
- assert.equal(merger.finish().filename,'2026_w42_1025-1031.xlsx');
+ assert.equal(merger.finish().filename,'2026_w42_2026-10-25-2026-10-31.xlsx');
 });
