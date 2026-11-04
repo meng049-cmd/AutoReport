@@ -122,10 +122,11 @@ function stageDefectTrend(analysis,filters){
  for(const row of rows){if(row.attributionOnly||!isStageProcess(row.process,filters.stage))continue;const key=periodKey(row.date,filters.granularity),group=groups.get(key)||[];group.push(row);groups.set(key,group);}
  const data=buckets.map(bucket=>{const rows=groups.get(bucket.key)||[],metrics=summarizeStage(rows,filters.stage),processes=new Map(),counts=new Map();
   for(const row of rows){const units=processes.get(row.process)||new Map();add(units,row);processes.set(row.process,units);}
-  for(const [process,units] of processes)for(const row of units.values())if(row.fail){const defectName=row.defect||'【未填不良項目】',key=JSON.stringify([process,defectName]);definitions.set(key,{process,defectName,defect:process+'｜'+defectName});counts.set(key,(counts.get(key)||0)+1);}
-  return {...bucket,...metrics,rate:null,counts,processes};
+  let processInput=0;
+  for(const [process,units] of processes){processInput+=units.size;for(const row of units.values())if(row.fail){const defectName=row.defect||'【未填不良項目】',definition=definitions.get(defectName)||{defectName,defect:defectName,processes:new Set()};definition.processes.add(process);definitions.set(defectName,definition);counts.set(defectName,(counts.get(defectName)||0)+1);}}
+  return {...bucket,...metrics,rate:null,processInput,counts,processes};
  }).filter(date=>date.input>0);
- const series=[...definitions].sort((a,b)=>a[0].localeCompare(b[0])).map(([key,definition])=>({...definition,points:data.map(({counts,processes,...row})=>{const input=processes.get(definition.process)?.size||0,count=counts.get(key)||0;return {...row,scopeInput:row.input,input,count,rate:input?count/input:null,uniqueRate:input?count/input:null};})}));
+ const series=[...definitions].sort((a,b)=>a[0].localeCompare(b[0])).map(([key,definition])=>({...definition,processes:[...definition.processes].sort(),points:data.map(({counts,processes,...row})=>{const input=row.processInput,count=counts.get(key)||0;return {...row,scopeInput:row.input,input,count,rate:input?count/input:null,uniqueRate:input?count/input:null};})}));
  return {dates:data.map(({counts,processes,...row})=>row),series,method:'process-denominator'};
 }
 export function stageComparisonSheet(analysis,filters={}){

@@ -11,7 +11,7 @@ function inlineCache(values,kind){
  const pointXml=values.map((value,index)=>value==null?'':`<c:pt idx="${index}"><c:v>${esc(value)}</c:v></c:pt>`).join('');
  return `<c:${kind}Cache>${kind==='num'&&'<c:formatCode>0.0%</c:formatCode>'||''}<c:ptCount val="${values.length}"/>${pointXml}</c:${kind}Cache>`;
 }
-function seriesXml({index,title,column,categories,values,color,line=false,showPoints=false,sheetName='每日階段良率'}){
+function seriesXml({index,title,column,categories,values,color,line=false,showPoints=false,showPointLabels=false,sheetName='每日階段良率'}){
  const formula=`'${sheetName}'!$${column}$2:$${column}$${categories.length+1}`;
  const titleFormula=`'${sheetName}'!$${column}$1`;
  const catFormula=`'${sheetName}'!$A$2:$A$${categories.length+1}`;
@@ -20,7 +20,7 @@ function seriesXml({index,title,column,categories,values,color,line=false,showPo
  const val=`<c:val><c:numRef><c:f>${formula}</c:f>${inlineCache(values,'num')}</c:numRef></c:val>`;
  const shape=line?`<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="${String(color||'396ED4').replace(/^#/,'')}"/></a:solidFill></a:ln></c:spPr>`:`<c:spPr><a:solidFill><a:srgbClr val="${String(color).replace(/^#/,'')}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr>`;
  const marker=line?(showPoints?'<c:marker><c:symbol val="circle"/><c:size val="5"/></c:marker>':'<c:marker><c:symbol val="none"/></c:marker>'):'';
- const labels=line?'':`<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`;
+ const labels=line?(showPointLabels?`<c:dLbls><c:numFmt formatCode="0.00%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`:''):`<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`;
  return `<c:ser><c:idx val="${index}"/><c:order val="${index}"/>${tx}${shape}${marker}${cat}${val}${labels}</c:ser>`;
 }
 function chartXml(stage,rows){
@@ -76,10 +76,14 @@ const notes=addTable({name:'統計說明',rows:[['項目','說明'],['範圍',op
 export const trendColors=['#117b73','#d54545','#396ed4','#d39421','#8f5cc2','#d0648c','#427e9c','#6d8b3f','#a85832','#4864a0','#8e6275','#218c98'];
 function columnName(index){let result='';while(index){index--;result=String.fromCharCode(65+index%26)+result;index=Math.floor(index/26);}return result;}
 function trendChartXml(stage,rows,trend){
- const series=trend.series.map((item,index)=>seriesXml({index,title:item.defect,column:columnName(index+2),categories:rows.map(row=>row.date),values:item.points.map(point=>point.rate),color:item.color||trendColors[index%trendColors.length],line:true,showPoints:true,sheetName:stage.sheetName}));
+ const series=trend.series.map((item,index)=>seriesXml({index,title:item.defect,column:columnName(index+2),categories:rows.map(row=>row.date),values:item.points.map(point=>point.rate),color:item.color||trendColors[index%trendColors.length],line:true,showPoints:true,showPointLabels:trend.series.length===1,sheetName:stage.sheetName}));
  return chartXml(stage,rows).replace(/<c:barChart>[\s\S]*?<\/c:barChart>/,'').replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/,`<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series.join('')}<c:marker val="1"/><c:smooth val="0"/><c:axId val="10"/><c:axId val="20"/></c:lineChart>`);
 }
 export async function createDefectTrendWorkbook(trend,options={}){
- const series=trend.series.length?trend.series:[{defect:'總不良率',points:trend.dates.map(date=>({...date,rate:date.rate})),color:trendColors[0]}],rows=trend.dates.map(date=>({date:date.label,value:date.rate}));
- return createStageChartWorkbook({kind:'defect',key:'推移圖',title:'不良項目不良率推移',sheetName:'不良率推移',chartTitle:'不良項目不良率推移',target:0,color:trendColors[0]},rows,{...options,trend:{series},notes:[['匯出項目','僅包含推移圖目前勾選且設為ON的不良項目；OFF項目不輸出。資料表與原生圖表使用相同項目，投入分母不因項目選擇而改變。'],['推移圖','每條線按製程＋不良項目分開：不良率＝該製程該項唯一不良PPID／該製程該日、週、月投入唯一PPID。母數包含該製程全部良品與不良品，不使用階段總投入，不跨製程平均。週／月在整個期間內跨日期去重；同製程每片只歸屬一項，FAIL／Scrap優先。畫面日期下的範圍投入是跨製程聯集概況，不是各線母數；各線實際母數見推移明細。'],['AOI排除範圍','先排除正面AOI、背面AOI的過站紀錄，再計算投入及不良。不是排除整個PPID：同一PPID在其他納入製程仍可計入；只有AOI紀錄者才不計。各製程分開檢視時可各自出現同一PPID，各製程投入不可直接相加當作總唯一投入。'],['缺資料','圖表與來源資料省略沒有投入的日期／區間；有投入且沒有該不良項目的日期仍顯示0%。原生折線圖可直接修改資料表。'],...(options.notes||[])],sheets:[...(options.sheets||[]),{name:'日期投入',rows:[trend.method==='process-denominator'?['日期區間','範圍唯一投入PPID（非各線母數）','範圍唯一不良PPID（不隨項目勾選）']:['日期區間','投入PPID','顯示項目不良PPID','顯示項目不良率'],...trend.dates.map(date=>trend.method==='process-denominator'?[date.label,date.input,date.count]:[date.label,date.input,date.count,date.rate])],percentColumns:trend.method==='process-denominator'?[]:[3]},{name:'推移明細',rows:[['日期區間','不良項目','投入PPID','該製程該項唯一不良PPID','不良率（該製程母數）','不良數／該製程投入驗算','製程','不良項目名稱'],...series.flatMap(item=>item.points.map(point=>[point.label,item.defect,point.input,point.count,point.rate,point.uniqueRate??(point.input?point.count/point.input:null),item.process||'',item.defectName||item.defect]))],percentColumns:[4,5]}]});
+ const series=trend.series.length?trend.series:[{defect:'總不良率',points:trend.dates.map(date=>({...date,rate:date.rate})),color:trendColors[0]}],rows=trend.dates.map(date=>({date:date.label,value:date.rate})),stageScoped=trend.method==='process-denominator';
+ const scopeNote=stageScoped
+  ?'同一不良項目跨目前篩選的製程合併。每個製程內先按PPID去重，再加總該項不良PPID；投入分母為各納入製程投入PPID加總，因此同一PPID通過多個製程時會依各製程分別計數。這是製程投入層級不良率，不等於全階段唯一PPID不良率。'
+  :'同一不良項目跨製程合併；不良數依全檔首次歸屬PPID計數，投入分母為篩選範圍內跨製程唯一投入PPID。';
+ const detailRows=[['日期區間','不良項目','投入PPID（此項母數）',stageScoped?'製程不良PPID加總':'首次歸屬不良PPID','不良率','不良率驗算','涵蓋製程','不良項目名稱'],...series.flatMap(item=>item.points.map(point=>[point.label,item.defect,point.input,point.count,point.rate,point.input?point.count/point.input:null,item.processes?.join('、')||(stageScoped?'依篩選製程':'全部納入製程'),item.defectName||item.defect]))];
+ return createStageChartWorkbook({kind:'defect',key:'推移圖',title:'不良項目不良率推移',sheetName:'不良率推移',chartTitle:'不良項目不良率推移',target:0,color:trendColors[0]},rows,{...options,trend:{series},notes:[['匯出項目','僅包含推移圖目前勾選且設為ON的不良項目；OFF項目不輸出。資料表與原生圖表使用相同項目，投入分母不因項目選擇而改變。'],['推移圖統計',scopeNote],['AOI排除範圍','先排除正面AOI、背面AOI的過站紀錄，再計算投入及不良。不是排除整個PPID：同一PPID在其他納入製程仍可計入；只有AOI紀錄者才不計。各製程分開檢視時可各自出現同一PPID，各製程投入不可直接相加當作總唯一投入。'],['缺資料','圖表與來源資料省略沒有投入的日期／區間；有投入且沒有該不良項目的日期仍顯示0%。原生折線圖可直接修改資料表。'],...(options.notes||[])],sheets:[...(options.sheets||[]),{name:'日期投入',rows:[stageScoped?['日期區間','範圍唯一投入PPID（非各線母數）','範圍唯一不良PPID（不隨項目勾選）']:['日期區間','投入PPID','顯示項目不良PPID','顯示項目不良率'],...trend.dates.map(date=>stageScoped?[date.label,date.input,date.count]:[date.label,date.input,date.count,date.rate])],percentColumns:stageScoped?[]:[3]},{name:'推移明細',rows:detailRows,percentColumns:[4,5]}]});
 }
