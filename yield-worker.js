@@ -3,7 +3,7 @@ importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-c
 self.onmessage=async({data})=>{try{
  const files=data.files||[data.file||data],merger=new DetailMerger(XLSX,{skipInvalidRows:data.skipInvalidRows===true}),started=performance.now(),timings={};let inputBook;
  const period=data.period||null,indexed=Array.isArray(data.indexedSources);
- if(period){const expected=AutoReportPeriods.periodFor(period.start_date,period.mode);if(expected.start_date!==period.start_date||expected.end_date!==period.end_date)throw Error('週／月日期區間無效。');}
+ if(period)AutoReportPeriods.validateRange(period);
  if(indexed){
   let rowCount=0,maxFileRows=0;for(const key of data.indexedSources){const meta=await AutoReportDetailIndex.meta(key);if(!meta?.complete)throw Error('日期索引尚未完成，請重新建立索引。');const count=AutoReportPeriods.rowsIn(meta,period);rowCount+=count;maxFileRows=Math.max(maxFileRows,count);}
   if(maxFileRows>300000)throw Error(`此期間包含 ${rowCount.toLocaleString()} 筆索引資料，超出本瀏覽器單次安全分析容量。請改選較短期間（例如由月改為週）；已完成的日期索引會保留。`);
@@ -29,8 +29,8 @@ self.onmessage=async({data})=>{try{
  timings.sheets=performance.now()-phase;
  const jsonMetadata=value=>JSON.stringify(value).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));book.Custprops.AutoReportSources=jsonMetadata(analysis.sources.map(source=>source.name));book.Custprops.AutoReportReferenceSources=jsonMetadata(analysis.referenceSources);
  // Analysis does not create an intermediate merged workbook.
- stats.filename=period?`${period.key}${period.mode==='month'?'_':''}${period.start_date}-${period.end_date}_不良分析.xlsx`:stats.filename.replace('.xlsx','_不良分析.xlsx');
- if(indexed){book.Custprops.AutoReportPeriod=JSON.stringify(period);XLSX.utils.sheet_add_aoa(book.Sheets['統計說明'],[['期間分析','以選定週／月內資料統一去重及判定首次不良；完整 Detail 保留在來源檔案庫，本報表只輸出統計與必要不良明細。']],{origin:-1});}
+ stats.filename=period?`${period.key.replace(/_$/,'')}_${period.start_date}-${period.end_date}_不良分析.xlsx`:stats.filename.replace('.xlsx','_不良分析.xlsx');
+ if(indexed){book.Custprops.AutoReportPeriod=JSON.stringify(period);XLSX.utils.sheet_add_aoa(book.Sheets['統計說明'],[['期間分析','以選定日／週／月起訖範圍內資料統一去重及判定首次不良，逐日計算每日良率；完整 Detail 保留在來源檔案庫，本報表只輸出統計與必要不良明細。']],{origin:-1});}
  self.postMessage({type:'progress',message:'分析完成，正在產生 Excel 下載檔…'});
  book.Workbook={...book.Workbook,Sheets:book.SheetNames.map(name=>({name,Hidden:(['計算明細','階段計算明細'].includes(name)||/^Detail(?:_\d+)?$/.test(name))?1:0}))};
  splitReportSheets(XLSX,book);phase=performance.now();const bytes=XLSX.write(book,{bookType:'xlsx',type:'array',compression:true});timings.reportWrite=performance.now()-phase;timings.total=performance.now()-started;

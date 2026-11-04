@@ -1,8 +1,8 @@
 import './navigation.mjs';
 import './file-library-ui.mjs';
+import './analysis-range-ui.mjs';
 import './ppid-lookup-ui.mjs';
-import {addLibraryFile,clearFileLibrary,beginFileOperation,endFileOperation,libraryIsBusy} from './file-library.mjs';
-import {MAX_BYTES} from './limits.mjs';
+import {addLibraryFile,listLibraryFiles,clearFileLibrary,beginFileOperation,endFileOperation,libraryIsBusy} from './file-library.mjs';
 import JSZip from 'jszip';
 import {setReferenceSources} from './report-context.mjs';
 import {correctionOrder} from './matcher.mjs';
@@ -10,7 +10,7 @@ import {canonicalCorrectionName} from './match-corrections.mjs';
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const worker=new Worker(new URL('./worker.js?v='+__BUILD_ID__,import.meta.url),{type:'module'});
-let nextId=0,downloads=[],downloadUrl=null,batchFiles=[],batchEntries=new Map(),batchCorrections=new Map(),correctionGroups=new Map(),correctionDrafts=new Map(),correctionPage=0;const pending=new Map();
+let nextId=0,downloads=[],downloadUrl=null,batchFiles=[],batchSourceIds=[],batchEntries=new Map(),batchCorrections=new Map(),correctionGroups=new Map(),correctionDrafts=new Map(),correctionPage=0;const pending=new Map();
 let matchOptions={ics:[],models:[]};
 worker.onmessage=({data})=>{const request=pending.get(data.id);if(!request)return;pending.delete(data.id);if(data.error)request.reject(Error(data.error));else request.resolve(data.result);};
 worker.onerror=()=>{for(const r of pending.values())r.reject(Error('比對工具載入失敗，請重新整理頁面。'));pending.clear();};
@@ -54,21 +54,20 @@ async function query(fulltext=false){
 }
 $('queryForm').onsubmit=e=>{e.preventDefault();query()};$('fulltext').onclick=()=>query(true);
 async function archiveRawFiles(files){
- for(const file of files)if(file.size<=MAX_BYTES)await addLibraryFile(file,{kind:'raw',collection:'raw',detail:false,sources:[{name:file.name,size:file.size,kind:'比對前原始檔'}]});
+ const ids=[];for(const file of files){const entry=await addLibraryFile(file,{kind:'raw',collection:'raw',detail:false,sources:[{name:file.name,size:file.size,kind:'比對前原始檔'}]});ids.push(entry.id);}return ids;
 }
-async function matchFiles(files,{archive=true,regenerate=false}={}){
+async function matchFiles(files,{archive=true,regenerate=false,sourceFileIds=[]}={}){
  if(!files.length){error(Error('請先選擇檔案。'));return;}
  if(!beginFileOperation())return;if(!regenerate)resetMatchCorrections(files);correctionGroups.clear();$('matchCorrectionFields').disabled=true;$('match').disabled=true;$('file').disabled=true;clearDownload();$('uploadResults').innerHTML='';$('message').className='';
  const used=new Set();let failed=0,total=0;const reports=[];
  try{
- if(archive)await archiveRawFiles(files);
+ if(!regenerate)batchSourceIds=archive?await archiveRawFiles(files):sourceFileIds;
  for(let index=0;index<files.length;index++){
   const file=files[index];$('message').textContent=`正在處理 ${index+1}/${files.length}：${file.name}`;
   try{
-   if(file.size>MAX_BYTES)throw Error('檔案超過 100 MB。');
    const bytes=await file.arrayBuffer();const r=await call('match',{bytes,filename:file.name,corrections:[...batchCorrections.values()]},[bytes]);
    collectMatchCorrections(r.corrections,file.name);
-   const summary='完成 '+r['筆數']+' 筆：'+Object.entries(r.counts).map(([k,v])=>k+' '+v+' 筆').join('、');
+   const summary='完成 '+r['筆數']+(r.detail?' 筆六製程資料（已排除 '+(r.excludedRows||0)+' 筆其他製程）：':' 筆：')+Object.entries(r.counts).map(([k,v])=>k+' '+v+' 筆').join('、');
    total+=r['筆數'];
    if(r['筆數']){
     $('message').textContent=`正在準備下載 ${index+1}/${files.length}：${file.name}`;
@@ -76,15 +75,12 @@ async function matchFiles(files,{archive=true,regenerate=false}={}){
     while(used.has(name.toLowerCase()))name=base+'_'+suffix+++'.xlsx';used.add(name.toLowerCase());
     const blob=new File([output],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const item={name,blob,url:URL.createObjectURL(blob),detail:r.detail};downloads.push(item);
-    const entry=await addLibraryFile(blob,{kind:'matched',detail:r.detail,rows:r['筆數'],replaceId:regenerate?batchEntries.get(index):undefined,sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});batchEntries.set(index,entry.id);
+    const sourceFileId=batchSourceIds[index],previous=sourceFileId?listLibraryFiles().find(item=>item.kind==='matched'&&item.sourceFileId===sourceFileId):null;
+    const entry=await addLibraryFile(blob,{kind:'matched',detail:r.detail,sourceFileId,rows:r['筆數'],replaceId:regenerate?batchEntries.get(index):previous?.id,sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});batchEntries.set(index,entry.id);
    }
    if(files.length===1)$('message').textContent=summary+(r['筆數']?'；已加入檔案庫，可勾選、取消勾選或刪除。':'');
   }catch(e){failed++;reports.push(file.name+'：'+e.message);if(files.length===1)error(e);}
   if(reports.length){$('message').textContent=reports.join('；');$('message').className='warn';}
- }
- if(downloads.length>1){
-  $('message').textContent='正在打包全部下載檔…';const zip=new JSZip();for(const d of downloads)zip.file(d.name,await d.blob.arrayBuffer());
-  downloadUrl=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'}));
  }
  $('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
  if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案；已加入檔案庫 ${downloads.length} 份。`+(reports.length?' '+reports.join('；'):'');
@@ -95,7 +91,7 @@ async function matchFiles(files,{archive=true,regenerate=false}={}){
  finally{$('uploadResults').innerHTML=downloads.length?table(['比對後檔案','下載'],downloads.map((item,index)=>[esc(item.name),`<button type="button" class="secondary" data-download="${index}">下載 Excel</button>`])):'';$('match').disabled=false;$('file').disabled=false;$('matchCorrectionFields').disabled=false;endFileOperation();renderMatchCorrections();}
 }
 $('match').onclick=()=>matchFiles(Array.from($('file').files));
-window.addEventListener('library-match',({detail:{files}})=>matchFiles(files,{archive:false}));
+window.addEventListener('library-match',({detail:{files,ids}})=>matchFiles(files,{archive:false,sourceFileIds:ids}));
 $('uploadResults').onclick=e=>{const button=e.target.closest('[data-download]');if(!button)return;const d=downloads[Number(button.dataset.download)];if(d)saveDownload(d.url,d.name);};
 $('file').onchange=()=>{clearDownload();resetMatchCorrections();$('uploadResults').innerHTML='';$('message').textContent='已選擇 '+$('file').files.length+' 個檔案，請點「開始比對」。';};
 $('matchRegenerate').onclick=async()=>{
@@ -143,10 +139,14 @@ $('matchCorrectionTable').onchange=event=>{
 };
 $('matchCorrectionPrev').onclick=()=>{if(correctionPage>0){correctionPage--;renderMatchCorrections();}};
 $('matchCorrectionNext').onclick=()=>{if((correctionPage+1)*50<correctionGroups.size){correctionPage++;renderMatchCorrections();}};
-$('export').onclick=()=>{
+$('export').onclick=async()=>{
  if(!downloads.length){error(Error('請先點「開始比對」，完成後即可下載。'));return;}
- const name=downloadUrl?'AUTOREPORT 工單查找與品質分析_批次結果.zip':downloads[0].name;
- saveDownload(downloadUrl||downloads[0].url,name);$('message').textContent='已送出下載：'+name+'。若沒有出現，請檢查瀏覽器的下載清單或下載權限。';
+ $('export').disabled=true;
+ try{
+  const name=downloads.length>1?'AUTOREPORT 工單查找與品質分析_批次結果.zip':downloads[0].name;
+  if(downloads.length>1&&!downloadUrl){$('message').textContent='正在打包下載檔…';const zip=new JSZip();for(const d of downloads)zip.file(d.name,d.blob);downloadUrl=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'}));}
+  saveDownload(downloadUrl||downloads[0].url,name);$('message').textContent='已送出下載：'+name+'。若沒有出現，請檢查瀏覽器的下載清單或下載權限。';
+ }catch(e){error(e);}finally{$('export').disabled=false;}
 };
 
 let uploadedFiles=[],sourceFiles=[],filesReady=false;

@@ -19,7 +19,7 @@ export function libraryCollection(entry){return ['raw','detail','mergedDetail','
 export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null,collection,sourceFileId,replaceId}={}){
  await libraryReady;const previous=replaceId?entries.get(replaceId):null;const entry={id:previous?.id||crypto.randomUUID(),name:file.name,blob:file,size:file.size,lastModified:file.lastModified,kind,detail,sources,rows,collection:libraryCollection({kind,collection}),sourceFileId,createdAt:previous?.createdAt||new Date().toISOString(),persistent:true};
  try{await write('readwrite',store=>store.put(entry));}catch{entry.persistent=false;}
- entries.set(entry.id,entry);if(previous)await removeAnalysisCaches([entry.id]);changed();return entry;
+ entries.set(entry.id,entry);if(previous){await removeAnalysisCaches([entry.id]);await globalThis.AutoReportDetailIndex.removeForIds([entry.id]).catch(()=>{});}changed();return entry;
 }
 export async function removeLibraryFiles(ids){await libraryReady;if(db)await write('readwrite',store=>ids.forEach(id=>store.delete(id)));else if(ids.some(id=>entries.get(id)?.persistent))throw Error('檔案清單連線已更新，請重新整理後再移除。');ids.forEach(id=>entries.delete(id));await removeAnalysisCaches(ids);await globalThis.AutoReportDetailIndex.removeForIds(ids).catch(()=>{});changed();}
 export async function clearFileLibrary(){await libraryReady;if(db)await write('readwrite',store=>store.clear());else if([...entries.values()].some(item=>item.persistent))throw Error('檔案清單連線已更新，請重新整理後再清空。');entries.clear();await clearAnalysisCaches();await globalThis.AutoReportDetailIndex.clear().catch(()=>{});changed();}

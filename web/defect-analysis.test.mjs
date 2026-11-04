@@ -16,18 +16,18 @@ test('trend exposure unions PPIDs across eligible processes and period dates, ex
 });
 function fixture(){const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),m=new ctx.DetailMerger(ctx.XLSX);
  const row=(id,process,day,status,defect,ic='A')=>[process,'o','p','n',id,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',defect,status,ic,'Model'];
- ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','P1',5,'GOOD','GOOD defect'),row('a','P2',6,'FAIL','first FAIL'),row('b','P1',5,'GOOD',null),row('c','P1',5,'FAIL','crack'),row('c','P2',5,'FAIL','later'),row('d','P1',5,'FAIL','dust','B'),row('e','P1',7,'GOOD',null,'B')]),'Detail');m.add(book,'原始.xlsx');return ctx.analyzeQuality(m);}
+ ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','DAF外觀',5,'GOOD','GOOD defect'),row('a','功能一測試',6,'FAIL','first FAIL'),row('b','DAF外觀',5,'GOOD',null),row('c','DAF外觀',5,'FAIL','crack'),row('c','功能一測試',5,'FAIL','later'),row('d','DAF外觀',5,'FAIL','dust','B'),row('e','DAF外觀',7,'GOOD',null,'B')]),'Detail');m.add(book,'原始.xlsx');return ctx.analyzeQuality(m);}
 test('every product/date/process/defect level reconciles first-FAIL attribution without inflating exposure counts',()=>{
  const analysis=fixture(),dates=calendarDates('2026-10-05','2026-10-07'),product=analysis.products.find(p=>p.ic==='A').id;
  const visit=(filters={})=>{const view=defectBreakdown(analysis,filters,dates);assert.equal(view.groups.reduce((n,r)=>n+r.count,0),view.dimension?view.count:0);assert.ok(Math.abs(view.groups.reduce((n,r)=>n+r.contribution,0)-(view.dimension?view.contribution:0))<1e-12);for(const group of view.groups)if(view.dimension)visit({...filters,[view.dimension]:group.key});};visit();
- assert.equal(cohortInput(analysis,{product,date:'2026-10-05'}),3,'two processes of the same PPID still mean one daily input');assert.equal(cohortInput(analysis,{product,date:'2026-10-05',process:'P2'}),1);
+ assert.equal(cohortInput(analysis,{product,date:'2026-10-05'}),3,'two processes of the same PPID still mean one daily input');assert.equal(cohortInput(analysis,{product,date:'2026-10-05',process:'功能一測試'}),1);
  const daily=defectBreakdown(analysis,{product},dates);assert.deepEqual(daily.groups.map(r=>r.count),[1,1,0]);assert.equal(daily.groups[2].input,0);assert.equal(daily.groups[2].rate,null);
- const leaf=defectBreakdown(analysis,{product,date:'2026-10-06',process:'P2',defect:'first FAIL'},dates);assert.equal(leaf.count,1);assert.equal(leaf.records[0].serial,'a');
+ const leaf=defectBreakdown(analysis,{product,date:'2026-10-06',process:'功能一測試',defect:'first FAIL'},dates);assert.equal(leaf.count,1);assert.equal(leaf.records[0].serial,'a');
  const leaves=allDefectLevels(analysis).filter(row=>row.level==='defect');assert.equal(leaves.reduce((n,row)=>n+row.count,0),analysis.fail);assert.ok(Math.abs(leaves.reduce((n,row)=>n+row.contribution,0)-analysis.badRate)<1e-12);
 });
 test('complete hierarchy retains all defect names rather than limiting to a ranking',()=>{
- const analysis=fixture(),product=analysis.products[0].id;analysis.attribution=Array.from({length:12},(_,i)=>({product,ic:'A',model:'Model',date:'2026-10-05',process:'P1',defect:'defect '+i,serial:'id'+i}));
- const result=defectBreakdown(analysis,{product,date:'2026-10-05',process:'P1'});assert.equal(result.groups.length,12);assert.equal(result.count,12);
+ const analysis=fixture(),product=analysis.products[0].id;analysis.attribution=Array.from({length:12},(_,i)=>({product,ic:'A',model:'Model',date:'2026-10-05',process:'DAF外觀',defect:'defect '+i,serial:'id'+i}));
+ const result=defectBreakdown(analysis,{product,date:'2026-10-05',process:'DAF外觀'});assert.equal(result.groups.length,12);assert.equal(result.count,12);
 });
 
 
@@ -85,16 +85,16 @@ test('product, defect and date first axes reconcile every drilldown and keep emp
 
 function sharedDefectFixture(){
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX),row=(serial,process,status,ic='A',day=5,order='o')=>[process,order,'p','n',serial,(Date.UTC(2026,9,day)-Date.UTC(1899,11,30))/86400000,'op',status==='FAIL'?'CG內異物':'',status,ic,'Model'];
- ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','P1','FAIL'),row('b','P1','GOOD'),row('c','P2','FAIL','B'),row('d','P2','GOOD','B'),row('e','P2','GOOD'),row('f','P2','GOOD','A',5,'other'),row('b','P2','GOOD'),row('g','P3','GOOD'),row('a','P1','GOOD','A',6),row('b','P1','GOOD','A',6)]),'Detail');merger.add(book,'same-defect.xlsx');return ctx.analyzeQuality(merger);
+ ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row('a','DAF外觀','FAIL'),row('b','DAF外觀','GOOD'),row('c','功能一測試','FAIL','B'),row('d','功能一測試','GOOD','B'),row('e','功能一測試','GOOD'),row('f','功能一測試','GOOD','A',5,'other'),row('b','功能一測試','GOOD'),row('g','輝度機測試','GOOD'),row('a','DAF外觀','GOOD','A',6),row('b','DAF外觀','GOOD','A',6)]),'Detail');merger.add(book,'same-defect.xlsx');return ctx.analyzeQuality(merger);
 }
 test('defect-first groups merge the same name across processes and use their unique input union',()=>{
  const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},order=defectDimensions('defect'),view=defectBreakdown(analysis,scope,[],order),item=view.groups[0];
  assert.equal(analysis.total,7);assert.equal(view.groups.length,1);assert.equal(item.key,'CG內異物');assert.equal(item.label,'CG內異物');assert.equal(item.input,7);assert.equal(item.count,2);assert.equal(item.rate,2/7);assert.equal(item.contribution,2/7);assert.deepEqual(parseDefectKey(item.key),{defect:'CG內異物'});assert.equal(defectFilterLabel(item.key),'CG內異物');
- const next=defectBreakdown(analysis,{...scope,defect:item.key},[],order);assert.equal(next.dimension,'product');assert.equal(next.input,7);assert.equal(next.count,2);assert.deepEqual(new Set(next.records.map(row=>row.process)),new Set(['P1','P2']));assert.ok(next.groups.every(g=>g.input<=7));
- assert.equal(cohortInput(analysis,{...scope,defect:item.key,process:'P2'}),5);assert.equal(attributedRows(analysis,{...scope,defect:item.key,process:'P2'}).length,1);
+ const next=defectBreakdown(analysis,{...scope,defect:item.key},[],order);assert.equal(next.dimension,'product');assert.equal(next.input,7);assert.equal(next.count,2);assert.deepEqual(new Set(next.records.map(row=>row.process)),new Set(['DAF外觀','功能一測試']));assert.ok(next.groups.every(g=>g.input<=7));
+ assert.equal(cohortInput(analysis,{...scope,defect:item.key,process:'功能一測試'}),5);assert.equal(attributedRows(analysis,{...scope,defect:item.key,process:'功能一測試'}).length,1);
 });
 test('defect ownership persists across product/date drilldowns, order filters and week/month unique PPID counting',()=>{
- const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},key=defectKey('P2','CG內異物'),order=defectDimensions('defect'),product=analysis.products.find(p=>p.ic==='B').id;
+ const analysis=sharedDefectFixture(),scope={startDate:'2026-10-05',endDate:'2026-10-06'},key=defectKey('功能一測試','CG內異物'),order=defectDimensions('defect'),product=analysis.products.find(p=>p.ic==='B').id;
  assert.equal(cohortInput(analysis,{...scope,defect:key}),7);assert.equal(cohortInput(analysis,{...scope,defect:key,order:'o'}),6);assert.equal(cohortInput(analysis,{...scope,defect:key,product}),2);
  const next=defectBreakdown(analysis,{...scope,defect:key,product},[],order);assert.equal(next.dimension,'date');assert.deepEqual(next.groups.map(g=>g.input),[2,0]);assert.equal(next.groups[0].rate,.5);assert.equal(next.groups[1].rate,null);
  for(const granularity of ['week','month']){const view=defectBreakdown(analysis,{...scope,granularity},[],order);assert.equal(view.groups.length,1);assert.equal(view.groups[0].input,7);assert.equal(view.groups[0].count,2);}
@@ -106,19 +106,19 @@ test('exported complete hierarchies carry process ownership before the process l
 });
 
 test('top quality summary recalculates date-range PPID unions and scoped failures instead of fixed whole-file totals',()=>{
- const row=(serial,date,process,fail,product='A',order='O1')=>({serial,date,process,fail,product,order}),analysis={observations:[row('a','2026-06-02','P1',true),row('a','2026-06-03','P2',false,'A','O2'),row('b','2026-06-03','P1',false),row('c','2026-06-03','P2',true),row('c','2026-06-03','P1',true),row('d','2026-06-04','P2',false,'B')]};
+ const row=(serial,date,process,fail,product='A',order='O1')=>({serial,date,process,fail,product,order}),analysis={observations:[row('a','2026-06-02','DAF外觀',true),row('a','2026-06-03','功能一測試',false,'A','O2'),row('b','2026-06-03','DAF外觀',false),row('c','2026-06-03','功能一測試',true),row('c','2026-06-03','DAF外觀',true),row('d','2026-06-04','功能一測試',false,'B')]};
  assert.deepEqual(scopedQualitySummary(analysis),{total:4,fail:2,good:2,yield:.5,badRate:.5});
- const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.deepEqual(scopedQualitySummary(analysis,scope),{total:3,fail:1,good:2,yield:2/3,badRate:1/3});assert.equal(scopedQualitySummary(analysis,{...scope,process:'P1'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,order:'O1'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,defect:'ignored'}).total,3);
+ const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.deepEqual(scopedQualitySummary(analysis,scope),{total:3,fail:1,good:2,yield:2/3,badRate:1/3});assert.equal(scopedQualitySummary(analysis,{...scope,process:'DAF外觀'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,order:'O1'}).total,2);assert.equal(scopedQualitySummary(analysis,{...scope,defect:'ignored'}).total,3);
  assert.deepEqual(scopedQualitySummary(analysis,{startDate:'2026-06-04',endDate:'2026-06-04',product:'B'}),{total:1,fail:0,good:1,yield:1,badRate:0});assert.deepEqual(scopedQualitySummary(analysis,{startDate:'2026-06-05',endDate:'2026-06-05'}),{total:0,fail:0,good:0,yield:null,badRate:null});assert.equal(scopedQualitySummary(analysis,{startDate:'2026-06-02',endDate:'2026-06-04'}).total,4);
 });
 test('a repeated FAIL inside a selected interval still lowers its quality yield even when globally attributed earlier',()=>{
- const analysis={observations:[{serial:'a',date:'2026-06-02',process:'P1',fail:true},{serial:'a',date:'2026-06-03',process:'P2',fail:true},{serial:'b',date:'2026-06-03',process:'P2',fail:false}],attribution:[{serial:'a',date:'2026-06-02',process:'P1'}]};const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.equal(attributedRows(analysis,scope).length,0);assert.deepEqual(scopedQualitySummary(analysis,scope),{total:2,fail:1,good:1,yield:.5,badRate:.5});
+ const analysis={observations:[{serial:'a',date:'2026-06-02',process:'DAF外觀',fail:true},{serial:'a',date:'2026-06-03',process:'功能一測試',fail:true},{serial:'b',date:'2026-06-03',process:'功能一測試',fail:false}],attribution:[{serial:'a',date:'2026-06-02',process:'DAF外觀'}]};const scope={startDate:'2026-06-03',endDate:'2026-06-03'};assert.equal(attributedRows(analysis,scope).length,0);assert.deepEqual(scopedQualitySummary(analysis,scope),{total:2,fail:1,good:1,yield:.5,badRate:.5});
 });
 
 test('date and process chart values use each column own PPID input instead of whole-file contributions',()=>{
  const analysis=fixture(),scope={startDate:'2026-10-05',endDate:'2026-10-07'},dates=defectBreakdown(analysis,scope,[],defectDimensions('date')),day=dates.groups.find(row=>row.key==='2026-10-06');
  assert.equal(analysis.total,5);assert.equal(day.input,1);assert.equal(day.count,1);assert.equal(day.contribution,.2);assert.equal(defectChartValue(day,'date'),1);assert.equal(defectChartValue(dates.groups[0],'date'),2/4);assert.equal(defectChartValue(dates.groups[2],'date'),0);
- const processes=defectBreakdown(analysis,{...scope,date:'2026-10-05'},[],defectDimensions('date')),p1=processes.groups.find(row=>row.key==='P1');assert.equal(p1.input,4);assert.equal(p1.count,2);assert.equal(defectChartValue(p1,'process'),.5);assert.notEqual(defectChartValue(p1,'process'),p1.contribution);
+ const processes=defectBreakdown(analysis,{...scope,date:'2026-10-05'},[],defectDimensions('date')),p1=processes.groups.find(row=>row.key==='DAF外觀');assert.equal(p1.input,4);assert.equal(p1.count,2);assert.equal(defectChartValue(p1,'process'),.5);assert.notEqual(defectChartValue(p1,'process'),p1.contribution);
  const empty=defectBreakdown(analysis,{...scope,endDate:'2026-10-08'},[],defectDimensions('date')).groups.at(-1);assert.equal(empty.input,0);assert.equal(defectChartValue(empty,'date'),null);assert.equal(usesGroupInputRate('process'),true);assert.equal(defectChartValue(day,'product'),day.contribution,'product whole-file contribution remains a separate calculation');
 });
 test('adding other selected dates does not dilute a date column PPID denominator or rate',()=>{

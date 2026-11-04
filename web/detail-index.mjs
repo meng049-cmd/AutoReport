@@ -1,7 +1,7 @@
 import '../indexed-detail-store.js';
 import '../period-core.js';
 export const periods=globalThis.AutoReportPeriods;
-export const indexKey=(file,id)=>JSON.stringify(['detail-index-v1',id||file.name,file.size,file.lastModified||0]);
+export const indexKey=(file,id)=>JSON.stringify(['detail-index-v2-six-processes',id||file.name,file.size,file.lastModified||0]);
 export async function existingIndex(file,id){const meta=await globalThis.AutoReportDetailIndex.meta(indexKey(file,id));return meta?.complete?{key:meta.key,name:meta.name,size:meta.size,dayCounts:meta.dayCounts,invalidRows:meta.skippedRows?.length||0,complete:true}:null;}
 export async function indexDetailFiles(files,{ids=[],onProgress=()=>{},signal}={}){
  const metas=[];

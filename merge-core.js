@@ -9,7 +9,8 @@
     if(status!=='FAIL'&&!defect)return null;
     return {order:String(row[1]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
-  const isAnalysisProcess=value=>!['正面AOI','背面AOI'].includes(String(value??'').normalize('NFKC').replace(/\s+/g,'').toUpperCase());
+  function canonicalAnalysisProcess(value){const name=String(value??'').normalize('NFKC').trim().replace(/\s+/g,'');return ({'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測':'輝度機測試'})[name]||name;}
+  const isAnalysisProcess=value=>['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].includes(canonicalAnalysisProcess(value));
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
   class DetailMerger {
     constructor(XLSX,{skipInvalidRows=false}={}) { this.XLSX = XLSX; this.skipInvalidRows=skipInvalidRows;this.skippedRows=[];this.rows = new Map(); this.total = 0; this.firstNG = new Map(); this.analysisFirstNG = new Map(); this.defectKeys = new Set(); this.sources = new Set(); }
@@ -18,7 +19,7 @@
       if(!names.some(name=>name.trim().toLowerCase()==='detail'))throw Error('找不到 Detail 分頁。');
       return XLSX.read(bytes,{type:'array',dense:true,sheets:names});
     }
-    add(book, filename) {
+    add(book, filename,{analysisOnly=false}={}) {
       let sourceNames;try{const saved=JSON.parse(book.Custprops?.AutoReportSources||'null');if(Array.isArray(saved)&&saved.length&&saved.every(name=>typeof name==='string'&&name.trim()))sourceNames=saved;}catch{}
       for(const name of sourceNames||[filename])this.sources.add(name);
       const XLSX = this.XLSX;
@@ -43,6 +44,7 @@
         const timestamp = row[this.time];
         const date = typeof timestamp === 'number' && Number.isFinite(timestamp) ? XLSX.SSF.parse_date_code(timestamp, {date1904: Boolean(book.Workbook?.WBProps?.date1904)}) : null;
         const invalid=[];if(!date||date.y<1900)invalid.push('產出時間無效');if(!process)invalid.push('製程空白');if(!serial)invalid.push('小板序號空白');if(!['GOOD','FAIL'].includes(status))invalid.push('狀態無效（須為 GOOD／FAIL／Scrap）');
+        if(invalid.length&&analysisOnly&&!isAnalysisProcess(process))continue;
         if(invalid.length){const reason=invalid.join('、');if(!this.skipInvalidRows)throw new Error(`${filename} 第 ${i + rowOffset} 列：${reason}。`);this.skippedRows.push({filename,row:i+rowOffset,reason,values:row.slice(0,11)});continue;}
         const day = `${date.y}-${String(date.m).padStart(2,'0')}-${String(date.d).padStart(2,'0')}`;
         // Normalize Excel's optional 1904 date system into the default 1900 system.
@@ -52,6 +54,7 @@
         const value={row,day,timestamp:normalized,key};fileValues.push(value);
         const ng=ngRecord(row,value,this.status),first=localNG.get(serial);
         if(ng){localDefectKeys.add(key);if(preferNG(ng,first))localNG.set(serial,ng);if(isAnalysisProcess(process)&&preferNG(ng,localAnalysisNG.get(serial)))localAnalysisNG.set(serial,ng);}
+        if(analysisOnly&&!isAnalysisProcess(process))continue;
         const old = this.rows.get(key);
         if (!old || (status === 'FAIL' && normalizeDetailStatus(old.row[this.status]) !== 'FAIL')) this.rows.set(key,value);
         this.total++;
@@ -132,6 +135,6 @@
       return {book, filename, input_rows: selectedRows?rows.length:this.total, output_rows: rows.length, removed_rows: selectedRows?0:this.total - rows.length, skipped_rows:skippedRows.length, start_date: first, end_date: last};
     }
   }
-  root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
+  root.canonicalAnalysisProcess=canonicalAnalysisProcess;root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
   if (typeof module !== 'undefined') module.exports = DetailMerger;
 })(typeof self !== 'undefined' ? self : globalThis);

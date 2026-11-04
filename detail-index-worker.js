@@ -4,7 +4,7 @@ self.onmessage=async({data:{file,key}})=>{try{
  const store=AutoReportDetailIndex;await store.reset(key);
  const merger=new DetailMerger(XLSX,{skipInvalidRows:true});
  self.postMessage({type:'progress',message:'正在解析 Detail…'});
- merger.add(DetailMerger.readBook(XLSX,await file.arrayBuffer()),file.name);
+ merger.add(DetailMerger.readBook(XLSX,await file.arrayBuffer()),file.name,{analysisOnly:true});
  const dayCounts={},header=merger.header.slice(0,11);let batch=[],seq=0;
  for(const value of merger.rows.values()){
   dayCounts[value.day]=(dayCounts[value.day]||0)+1;
@@ -13,5 +13,5 @@ self.onmessage=async({data:{file,key}})=>{try{
  }
  if(batch.length)await store.putRows(batch);
  const meta={key,name:file.name,size:file.size,header,dayCounts,invalidRows:merger.skippedRows.length,firstNG:[...merger.firstNG.values()],analysisFirstNG:[...merger.analysisFirstNG.values()],sources:[...merger.sources],skippedRows:merger.skippedRows,complete:true};
- await store.putMeta(meta);self.postMessage({type:'complete',meta:{key:meta.key,name:meta.name,size:meta.size,dayCounts:meta.dayCounts,invalidRows:meta.invalidRows,complete:true}});
+ await store.putMeta(meta);await store.prune?.(key);self.postMessage({type:'complete',meta:{key:meta.key,name:meta.name,size:meta.size,dayCounts:meta.dayCounts,invalidRows:meta.invalidRows,complete:true}});
 }catch(error){self.postMessage({type:'error',message:error.name==='QuotaExceededError'?'本機儲存空間不足，日期索引尚未完成。請釋放空間後重試；已完成的索引會保留。':error.message||'日期索引建立失敗。'});}};
