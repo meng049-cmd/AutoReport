@@ -67,7 +67,7 @@ export function defectBreakdown(analysis,filters={},dates=[],order=dimensions){
  if(dimension==='date'){const start=filters.startDate||dates[0]||analysis.start_date,end=filters.endDate||dates.at(-1)||analysis.end_date;for(const bucket of scopedBuckets(start,end,filters))ensure(bucket.key,bucket.label);}
  if(dimension==='process'){if(analysis.observations)for(const row of filteredObservations(analysis,filters))ensure(row.process,row.process);else for(const [key] of analysis.dailyProcessTotals||[]){const [product,date,process]=JSON.parse(key);if(matches({product,date,process},filters,true))ensure(process,process);}}
  for(const row of records)if(dimension){const key=dimension==='date'?periodKey(row.date,filters.granularity):dimension==='defect'?row.defect:row[dimension],label=dimension==='product'?row.ic+'／'+row.model:dimension==='defect'?row.defect:key;ensure(key,label,dimension==='defect'?{defect:row.defect}:{}).count++;}
- const groups=[...groupMap.values()].map(group=>{const input=cohortInput(analysis,{...filters,[dimension]:group.key});return {...group,input,rate:input?group.count/input:null,contribution:analysis.total?group.count/analysis.total:0};});
+ const groups=[...groupMap.values()].map(group=>{const input=cohortInput(analysis,{...filters,[dimension]:group.key});return {...group,input,rate:input?group.count/input:null,contribution:analysis.total?group.count/analysis.total:0};}).filter(group=>dimension!=='date'||group.input>0);
  if(dimension!=='date')groups.sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label));
  return {dimension,groups,records,input:cohortInput(analysis,filters),count:records.length,contribution:analysis.total?records.length/analysis.total:0};
 }
@@ -95,7 +95,7 @@ export function defectTrend(analysis,filters={}){
  for(const row of filteredObservations(analysis,scope))inputs.get(periodKey(row.date,filters.granularity))?.add(row.serial);
  for(const row of attributedRows(analysis,scope)){if(filters.defect&&row.defect!==filters.defect)continue;const key=periodKey(row.date,filters.granularity);items.add(row.defect);const group=counts.get(row.defect)||new Map();group.set(key,(group.get(key)||0)+1);counts.set(row.defect,group);bad.set(key,(bad.get(key)||0)+1);}
  if(filters.defect)items.add(filters.defect);
- const dates=buckets.map(b=>({...b,input:inputs.get(b.key).size,count:bad.get(b.key)||0,rate:inputs.get(b.key).size?(bad.get(b.key)||0)/inputs.get(b.key).size:null}));
+ const dates=buckets.map(b=>({...b,input:inputs.get(b.key).size,count:bad.get(b.key)||0,rate:inputs.get(b.key).size?(bad.get(b.key)||0)/inputs.get(b.key).size:null})).filter(date=>date.input>0);
  const series=[...items].sort().map(defect=>({defect,points:dates.map(b=>({...b,count:counts.get(defect)?.get(b.key)||0,rate:b.input?(counts.get(defect)?.get(b.key)||0)/b.input:null}))}));
  return {dates,series};
 }
@@ -113,7 +113,7 @@ export function orderStageSeries(analysis,stage,filters={},dates=[]){
 export function stageComparisonRows(analysis,filters={}){
  const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map();
  for(const row of rows){const key=periodKey(row.date,filters.granularity),group=groups.get(key)||[];group.push(row);groups.set(key,group);}
- return buckets.flatMap(bucket=>(['前段','後段'].includes(filters.stage)?[filters.stage]:['前段','後段']).map(stage=>({...bucket,stage,...summarizeStage(groups.get(bucket.key)||[],stage)})));
+ return buckets.flatMap(bucket=>(['前段','後段'].includes(filters.stage)?[filters.stage]:['前段','後段']).map(stage=>({...bucket,stage,...summarizeStage(groups.get(bucket.key)||[],stage)}))).filter(row=>row.input>0);
 }
 
 function stageDefectTrend(analysis,filters){
@@ -124,7 +124,7 @@ function stageDefectTrend(analysis,filters){
   for(const row of rows){const units=processes.get(row.process)||new Map();add(units,row);processes.set(row.process,units);}
   for(const [process,units] of processes)for(const row of units.values())if(row.fail){const defectName=row.defect||'【未填不良項目】',key=JSON.stringify([process,defectName]);definitions.set(key,{process,defectName,defect:process+'｜'+defectName});counts.set(key,(counts.get(key)||0)+1);}
   return {...bucket,...metrics,rate:null,counts,processes};
- });
+ }).filter(date=>date.input>0);
  const series=[...definitions].sort((a,b)=>a[0].localeCompare(b[0])).map(([key,definition])=>({...definition,points:data.map(({counts,processes,...row})=>{const input=processes.get(definition.process)?.size||0,count=counts.get(key)||0;return {...row,scopeInput:row.input,input,count,rate:input?count/input:null,uniqueRate:input?count/input:null};})}));
  return {dates:data.map(({counts,processes,...row})=>row),series,method:'process-denominator'};
 }

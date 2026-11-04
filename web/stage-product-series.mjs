@@ -8,6 +8,6 @@ export function productStageSeries(analysis,productId,stage,start,end,days=[]){
  const weeks=calendarBuckets(earlier.toISOString().slice(0,10),end,'week').slice(-2).map(bucket=>{
   const rows=observations.filter(row=>row.date>=bucket.start&&row.date<=bucket.end&&row.date>=start&&row.date<=end);
   return {date:bucket.key,label:bucket.key.slice(5),kind:'week',start:bucket.start,end:bucket.end,...summarizeStage(rows,stage)};
- });
- const daily=model.daily.filter(row=>!days.length||days.includes(row.date));return {...model,daily,weeks,chartRows:[...weeks,...daily]};
+ }).filter(row=>row.input>0);
+ const daily=model.daily.filter(row=>(!days.length||days.includes(row.date))&&row.input>0);return {...model,daily,weeks,chartRows:[...weeks,...daily]};
 }
