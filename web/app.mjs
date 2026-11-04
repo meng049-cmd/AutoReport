@@ -38,7 +38,7 @@ function renderMatchCorrections(){
  const groups=[...correctionGroups.values()];$('matchCorrections').hidden=!groups.length;
  if(!groups.length)return;
  const pending=groups.reduce((sum,group)=>sum+group.pending,0),filled=groups.reduce((sum,group)=>sum+group.rows-group.pending,0);
- $('matchCorrectionSummary').textContent=`共 ${groups.length} 組工單／料號，${pending} 筆待補填、${filled} 筆已手動補填。請完整填寫需要補填列的 IC 與機種。`;
+ $('matchCorrectionSummary').textContent=`共 ${groups.length} 組工單／料號，${pending} 筆待補填、${filled} 筆已手動補填。僅列出前段／後段階段計算製程（DAF外觀、DAF熱壓投入、功能一測試、功能二測試、外觀檢查點亮測試、輝度機測試）；其他製程不需補填。請完整填寫列出的 IC 與機種。`;
  correctionPage=Math.min(correctionPage,Math.ceil(groups.length/50)-1);const offset=correctionPage*50;
  $('matchCorrectionPage').textContent=`第 ${correctionPage+1}／${Math.ceil(groups.length/50)} 頁 · 共 ${groups.length} 組`;$('matchCorrectionPrev').disabled=correctionPage===0;$('matchCorrectionNext').disabled=offset+50>=groups.length;
  $('matchCorrectionTable').innerHTML=table(['工單號碼','料號／查找值','來源檔案','筆數','比對狀態','IC','機種'],groups.slice(offset,offset+50).map((group,position)=>{

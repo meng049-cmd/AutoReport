@@ -14,6 +14,27 @@ export function canonicalCorrectionName(value,options=[]){
  return options.find(option=>norm(option)===key)||label;
 }
 
+const stageProcesses=new Set(['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].map(norm));
+const stageProcessAliases=new Map([
+ ['DAF外觀檢查','DAF外觀'],['DAF熱壓入','DAF熱壓投入'],['功能一測','功能一測試'],['功能一測試站','功能一測試'],
+ ['功能二測','功能二測試'],['功能二測試站','功能二測試'],['外觀檢查點亮','外觀檢查點亮測試'],['輝度機測','輝度機測試']
+].map(([alias,canonical])=>[norm(alias),norm(canonical)]));
+
+function correctionProcess(row){
+ const source=row['原始資料'];if(!Array.isArray(source))return {available:false,value:''};
+ if(row['分頁']==='Detail')return {available:true,value:text(source[0])};
+ const cell=source.find(item=>item&&typeof item==='object'&&(/制程|工序|站别|工位|站点|process|station/.test(norm(item['欄位']))));
+ return cell?{available:true,value:text(cell['值'])}:{available:false,value:''};
+}
+
+function needsStageCorrection(row){
+ const {available,value}=correctionProcess(row);
+ // Query sheets without a process field retain the existing lookup behavior.
+ if(!available)return row['分頁']!=='Detail';
+ const process=norm(value);if(!process)return false;
+ return stageProcesses.has(stageProcessAliases.get(process)||process);
+}
+
 function identity(result,row){
  const criteria=(row['查找條件']||[]).map(item=>[item['欄位類別'],text(item['查找值'])]).filter(([,value])=>value);
  const order=criteria.find(([kind])=>kind==='order')?.[1]||'';
@@ -27,7 +48,7 @@ function identity(result,row){
 export function summarizeMatchCorrections(result){
  const groups=new Map();
  for(const row of result['結果']){
-  if(row['狀態']==='唯一匹配')continue;
+  if(row['狀態']==='唯一匹配'||!needsStageCorrection(row))continue;
   const item=identity(result,row);
   if(!groups.has(item.key))groups.set(item.key,{...item,rows:0,pending:0,statuses:new Set(),sheets:new Set()});
   const group=groups.get(item.key);group.rows++;if(row['狀態']!=='手動補填')group.pending++;
