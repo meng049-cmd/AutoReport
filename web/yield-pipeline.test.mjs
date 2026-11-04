@@ -1,10 +1,25 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';import {performance} from 'node:perf_hooks';
+import {validateYieldFiles} from './limits.mjs';
 function runtime(){const ctx=vm.createContext({URL,performance});ctx.self=ctx;ctx.location={href:'https://example.test/yield-worker.js?v=test'};ctx.importScripts=(...paths)=>{for(const path of paths)vm.runInContext(readFileSync(path.split('?')[0],'utf8'),ctx);};const messages=[];ctx.postMessage=data=>messages.push(data);vm.runInContext(readFileSync('yield-worker.js','utf8'),ctx);return {ctx,messages};}
 const header=['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'];
 function file(XLSX,name,rows){const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});return {name,arrayBuffer:async()=>bytes};}
 const row=(serial,process,status,defect,day=5,order='WO')=>[process,order,'part','name',serial,46300+day,'op',defect,status,'IC','Model'];
 const plain=value=>JSON.parse(JSON.stringify(value));
 const sorted=rows=>plain(rows).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+test('yield accepts more than 30 merged Detail parts totaling over 100 MB and analyzes all selected PPIDs together',async()=>{
+ const {ctx,messages}=runtime();
+ // File sizes exercise the UI admission rule without allocating 124 MB of fixtures.
+ const files=Array.from({length:31},(_,i)=>({...file(ctx.XLSX,`merged_part${i+1}.xlsx`,[row(`ppid-${i}`,'DAF外觀','GOOD',null),row('shared','DAF外觀','GOOD',null)]),size:4*1024*1024}));
+ assert.doesNotThrow(()=>validateYieldFiles(files));
+ assert.doesNotThrow(()=>validateYieldFiles([{name:'large.xlsx',size:101*1024*1024}]));
+ assert.throws(()=>validateYieldFiles([]),/至少 1 份/);
+ assert.throws(()=>validateYieldFiles([{name:'empty.xlsx',size:0}]),/有效/);
+ assert.throws(()=>validateYieldFiles([{name:'wrong.csv',size:10}]),/有效/);
+ await ctx.onmessage({data:{files}});
+ const result=messages.at(-1);assert.equal(result.type,'complete',result.message);
+ assert.equal(result.analysis.total,32);assert.equal(result.analysis.fail,0);
+ assert.equal(messages.filter(item=>item.type==='progress'&&item.message.startsWith('正在讀取並驗證')).length,31);
+});
 test('one worker reads each selected workbook once and preserves legacy multi-file analysis, raw rows, first-Scrap priority and Excel formulas',async()=>{
  const {ctx,messages}=runtime(),{XLSX,DetailMerger}=ctx,files=[file(XLSX,'a.xlsx',[row('a','功能一測試','GOOD','GOOD evidence',7),row('a','功能一測試','Scrap','first FAIL class',6,'FIRST'),row('b','DAF外觀','GOOD',null),row('aoi','正面AOI','FAIL','excluded')]),file(XLSX,'b.xlsx',[row('a','DAF外觀','FAIL','older timestamp',3),row('b','DAF外觀','GOOD',null),row('c','DAF外觀','FAIL',null)])];
  const legacy=new DetailMerger(XLSX);for(const input of files)legacy.add(DetailMerger.readBook(XLSX,await input.arrayBuffer()),input.name);const merged=legacy.finish(),again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'merged.xlsx');const expected=ctx.analyzeQuality(again),expectedReport=ctx.buildYieldReport(again,expected.identities);ctx.applyProductStageAverage(expected,expectedReport.calculation.stageChecks);
