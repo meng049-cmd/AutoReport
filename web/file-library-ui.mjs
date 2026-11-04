@@ -1,14 +1,15 @@
 import {navigate} from './navigation.mjs';
 import JSZip from 'jszip';
-import {libraryReady,libraryEvents,libraryCollection,listLibraryFiles,removeLibraryFiles,entryFile,entrySources,libraryIsBusy,beginFileOperation,endFileOperation} from './file-library.mjs';
+import {libraryReady,libraryEvents,libraryCollection,listLibraryFiles,addLibraryFile,removeLibraryFiles,entryFile,entrySources,libraryIsBusy,beginFileOperation,endFileOperation} from './file-library.mjs';
 import {analyzeYieldFiles} from './yield-ui.mjs';
-const $=id=>document.getElementById(id),urls=new Map(),states={raw:{selected:new Set(),search:'',kind:'',page:0,purpose:''},detail:{selected:new Set(),search:'',kind:'',page:0,purpose:''},analysis:{selected:new Set(),search:'',kind:'analysis',page:0,purpose:''}};
+import {mergeDetailFiles} from './detail-merge.mjs';
+const $=id=>document.getElementById(id),urls=new Map(),states={raw:{selected:new Set(),search:'',kind:'',page:0,purpose:''},detail:{selected:new Set(),search:'',kind:'',page:0,purpose:''},mergedDetail:{selected:new Set(),search:'',kind:'',page:0,purpose:''},analysis:{selected:new Set(),search:'',kind:'analysis',page:0,purpose:''}};
 let active='detail',selected=states.detail.selected;
-const kindNames={raw:'比對前原始檔',matched:'比對完成',merged:'Detail 合併',analysis:'良率與不良分析',input:'上傳主檔'};
+const kindNames={raw:'比對前原始檔',matched:'比對完成',merged:'合併 Detail',analysis:'良率與不良分析',input:'上傳主檔'};
 let page=0;
 function visibleFiles(){const query=$('librarySearch').value.trim().normalize('NFKC').toLowerCase(),kind=$('libraryKind').value;return listLibraryFiles().filter(item=>libraryCollection(item)===active&&(!kind||item.kind===kind)&&(!query||item.name.normalize('NFKC').toLowerCase().includes(query)));}
 function selection(){const entries=new Map(listLibraryFiles().map(item=>[item.id,item]));return [...selected].map(id=>entries.get(id)).filter(item=>item&&libraryCollection(item)===active);}
-function updateActions(){const items=selection(),detail=!libraryIsBusy()&&items.length&&items.every(item=>item.detail);$('libraryMatch').disabled=libraryIsBusy()||!items.length||active!=='raw';$('libraryAnalyze').disabled=!detail||active==='raw';$('libraryPpidLookup').disabled=libraryIsBusy()||active==='raw'||!items.length||!items.every(item=>active==='analysis'?item.kind==='analysis':item.detail);$('libraryDownload').disabled=libraryIsBusy()||!items.length;$('libraryRemove').disabled=libraryIsBusy()||!items.length;$('librarySelected').textContent='已勾選 '+items.length+' 份';const visible=visibleFiles(),marked=visible.filter(item=>selected.has(item.id)).length,header=$('librarySelectVisible');if(header){header.checked=visible.length>0&&marked===visible.length;header.indeterminate=marked>0&&marked<visible.length;header.disabled=libraryIsBusy()||!visible.length;}$('librarySelectAll').disabled=libraryIsBusy()||!visible.length;$('libraryClearSelection').disabled=libraryIsBusy()||!items.length;const incompatible=active!=='raw'&&items.some(item=>!item.detail);if(incompatible)$('libraryPurpose').textContent='分析請選擇含 Detail 分頁的檔案。';else if($('libraryPurpose').textContent==='分析請選擇含 Detail 分頁的檔案。')$('libraryPurpose').textContent='';}
+function updateActions(){const items=selection(),detail=!libraryIsBusy()&&items.length&&items.every(item=>item.detail),mergeScope=['detail','mergedDetail'].includes(active);$('libraryMatch').disabled=libraryIsBusy()||!items.length||active!=='raw';$('libraryAnalyze').disabled=!detail||active==='raw';$('libraryMerge').hidden=!mergeScope;$('libraryMerge').textContent=active==='mergedDetail'?'再次合併所選 Detail':'合併所選 Detail';$('libraryMerge').disabled=libraryIsBusy()||!detail||!mergeScope;$('libraryPpidLookup').disabled=libraryIsBusy()||active==='raw'||!items.length||!items.every(item=>active==='analysis'?item.kind==='analysis':item.detail);$('libraryDownload').disabled=libraryIsBusy()||!items.length;$('libraryRemove').disabled=libraryIsBusy()||!items.length;$('librarySelected').textContent='已勾選 '+items.length+' 份';const visible=visibleFiles(),marked=visible.filter(item=>selected.has(item.id)).length,header=$('librarySelectVisible');if(header){header.checked=visible.length>0&&marked===visible.length;header.indeterminate=marked>0&&marked<visible.length;header.disabled=libraryIsBusy()||!visible.length;}$('librarySelectAll').disabled=libraryIsBusy()||!visible.length;$('libraryClearSelection').disabled=libraryIsBusy()||!items.length;const incompatible=active!=='raw'&&items.some(item=>!item.detail);if(incompatible)$('libraryPurpose').textContent='分析請選擇含 Detail 分頁的檔案。';else if($('libraryPurpose').textContent==='分析請選擇含 Detail 分頁的檔案。')$('libraryPurpose').textContent='';}
 function render(){
  const all=listLibraryFiles(),known=new Set(all.map(item=>item.id));for(const [id,url] of urls)if(!known.has(id)){URL.revokeObjectURL(url);urls.delete(id);}for(const id of selected)if(!known.has(id))selected.delete(id);
  const items=visibleFiles(),pages=Math.max(1,Math.ceil(items.length/20));page=Math.min(page,pages-1);$('libraryCount').textContent=all.filter(item=>libraryCollection(item)===active).length+' 份檔案';$('libraryPrev').disabled=page===0;$('libraryNext').disabled=page===pages-1;$('libraryPage').textContent=(page+1)+' / '+pages;
@@ -31,13 +32,26 @@ $('libraryMatch').onclick=()=>{const items=selection();if(!items.length||library
 $('viewMatchedFiles').onclick=()=>{navigate('files');$('libraryKind').value='matched';$('librarySearch').value='';page=0;render();$('fileLibrary').scrollIntoView({behavior:'smooth',block:'start'});};
 $('libraryAnalyze').onclick=()=>{const items=selection();navigate('yield');analyzeYieldFiles(items.map(entryFile),{sources:entrySources(items),fromLibrary:true,fileIds:items.map(item=>item.id)});};
 $('libraryPpidLookup').onclick=()=>{const items=selection().filter(item=>active==='analysis'?item.kind==='analysis':item.detail);if(!items.length)return;window.dispatchEvent(new CustomEvent('ppid-lookup-files',{detail:{ids:items.map(item=>item.id),collection:active}}));};
+$('libraryMerge').onclick=async()=>{
+ const items=selection();if(!items.length||items.some(item=>!item.detail)||!['detail','mergedDetail'].includes(active))return;
+ const files=items.map(entryFile);if(!beginFileOperation())return;$('libraryPurpose').className='muted';$('libraryPurpose').textContent='準備合併所選 Detail 檔案…';
+ try{
+  const data=await mergeDetailFiles(files,message=>{$('libraryPurpose').textContent=message;});
+  const file=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const entry=await addLibraryFile(file,{kind:'merged',collection:'mergedDetail',sources:entrySources(items),rows:data.output_rows});
+  states.mergedDetail.selected.clear();states.mergedDetail.selected.add(entry.id);states.mergedDetail.search='';states.mergedDetail.kind='';states.mergedDetail.page=0;
+  states.mergedDetail.purpose=`合併完成：Detail 日期區間 ${data.start_date} 至 ${data.end_date}，已新增「${data.filename}」至合併 Detail 比對檔案庫。`;
+  navigate('mergedDetail');$('libraryPurpose').className='ok';$('libraryPurpose').textContent=states.mergedDetail.purpose;
+ }catch(error){$('libraryPurpose').className='warn';$('libraryPurpose').textContent=error.message;}
+ finally{endFileOperation();}
+};
 $('libraryDownload').onclick=async()=>{const items=selection();if(!items.length)return;const button=$('libraryDownload');button.disabled=true;try{const zip=new JSZip(),used=new Set();for(const item of items){let name=item.name,index=2;const dot=item.name.lastIndexOf('.'),base=dot>0?item.name.slice(0,dot):item.name,extension=dot>0?item.name.slice(dot):'';while(used.has(name.toLowerCase()))name=base+'_'+index+++extension;used.add(name.toLowerCase());zip.file(name,item.blob);}const url=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'})),link=document.createElement('a');link.href=url;link.download='AutoReport_檔案清單.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}catch(error){$('libraryPurpose').textContent=error.message;}finally{updateActions();}};
 libraryEvents.addEventListener('change',render);libraryReady.then(render);
 
-window.addEventListener('library-choose-ppid',({detail})=>{const collection=detail?.collection==='analysis'?'analysis':'detail';navigate(collection==='analysis'?'reports':'files');$('libraryKind').value=collection==='analysis'?'analysis':'matched';$('librarySearch').value='';page=0;render();$('libraryPurpose').textContent=`勾選${collection==='analysis'?'分析報表':'Detail 比對'}檔案後，點「帶入 PPID 查找」；查找只掃描所選檔案庫。`;$('fileLibrary').scrollIntoView({behavior:'smooth',block:'start'});});
+window.addEventListener('library-choose-ppid',({detail})=>{const collection=['analysis','mergedDetail'].includes(detail?.collection)?detail.collection:'detail';const route=collection==='analysis'?'reports':collection==='mergedDetail'?'mergedDetail':'files';navigate(route);$('libraryKind').value=collection==='analysis'?'analysis':collection==='mergedDetail'?'merged':'';$('librarySearch').value='';page=0;render();$('libraryPurpose').textContent=`勾選${collection==='analysis'?'分析報表':collection==='mergedDetail'?'合併 Detail':'Detail 比對'}檔案後，點「帶入 PPID 查找」；查找只掃描所選檔案庫。`;$('fileLibrary').scrollIntoView({behavior:'smooth',block:'start'});});
 window.addEventListener('library-open-ppid-file',({detail:{id}})=>{
  const item=listLibraryFiles().find(entry=>entry.id===id);if(!item)return;
- const collection=libraryCollection(item),state=states[collection],route=collection==='raw'?'raw':collection==='analysis'?'reports':'files';
+ const collection=libraryCollection(item),state=states[collection],route=collection==='raw'?'raw':collection==='analysis'?'reports':collection==='mergedDetail'?'mergedDetail':'files';
  state.selected.clear();state.selected.add(item.id);Object.assign(state,{search:item.name,kind:item.kind,page:0,purpose:'PPID 查找到此檔案。'});
  navigate(route);
  $('librarySearch').value=state.search;$('libraryKind').value=state.kind;page=0;render();
@@ -46,15 +60,16 @@ window.addEventListener('library-open-ppid-file',({detail:{id}})=>{
 
 
 function configureCollection(){
- const names=active==='raw'?[['','全部原始檔'],['raw','比對前原始檔']]:active==='detail'?[['','全部 Detail 檔案'],['matched','比對完成'],['merged','Detail 合併']]:[['','全部分析檔案'],['input','分析主檔'],['merged','分析合併主檔'],['analysis','良率與不良分析報表']];
+ const names=active==='raw'?[['','全部原始檔'],['raw','比對前原始檔']]:active==='detail'?[['','全部 Detail 檔案'],['matched','比對完成'],['merged','舊版合併檔']]:active==='mergedDetail'?[['','全部合併 Detail'],['merged','合併結果']]:[['','全部分析檔案'],['input','分析主檔'],['merged','分析合併主檔'],['analysis','良率與不良分析報表']];
  $('libraryKind').replaceChildren(...names.map(([value,label])=>{const option=document.createElement('option');option.value=value;option.textContent=label;return option;}));
- $('referenceFiles').hidden=active!=='detail';$('libraryTitle').textContent=active==='raw'?'Raw Data 原始檔案庫':active==='detail'?'Detail 比對檔案庫':'每日良率與不良分析檔案庫';
+ $('referenceFiles').hidden=active!=='detail';$('libraryTitle').textContent=active==='raw'?'Raw Data 原始檔案庫':active==='detail'?'Detail 比對檔案庫':active==='mergedDetail'?'合併 Detail 比對檔案庫':'每日良率與不良分析檔案庫';
+ $('libraryMergeHint').hidden=!['detail','mergedDetail'].includes(active);
  $('libraryMatch').hidden=active!=='raw';
  $('libraryAnalyze').hidden=active==='raw';$('libraryPpidLookup').hidden=active==='raw';$('libraryPpidLookup').textContent='帶入 PPID 查找';
- for(const link of document.querySelectorAll('.file-tabs a'))link.setAttribute('aria-current',link.getAttribute('href')===(active==='raw'?'#/raw':active==='detail'?'#/files':'#/reports')?'page':'false');
+ for(const link of document.querySelectorAll('.file-tabs a'))link.setAttribute('aria-current',link.getAttribute('href')===(active==='raw'?'#/raw':active==='detail'?'#/files':active==='mergedDetail'?'#/mergedDetail':'#/reports')?'page':'false');
 }
 window.addEventListener('viewchange',({detail:{page:pageName}})=>{
- if(['raw','files','reports'].includes(pageName)){const next=pageName==='raw'?'raw':pageName==='reports'?'analysis':'detail';if(next!==active){Object.assign(states[active],{search:$('librarySearch').value,kind:$('libraryKind').value,page,purpose:$('libraryPurpose').textContent});active=next;selected=states[active].selected;configureCollection();$('librarySearch').value=states[active].search;$('libraryKind').value=states[active].kind;page=states[active].page;$('libraryPurpose').textContent=states[active].purpose;}else{const kind=$('libraryKind').value;configureCollection();$('libraryKind').value=kind;}}
+ if(['raw','files','mergedDetail','reports'].includes(pageName)){const next=pageName==='raw'?'raw':pageName==='reports'?'analysis':pageName==='mergedDetail'?'mergedDetail':'detail';if(next!==active){Object.assign(states[active],{search:$('librarySearch').value,kind:$('libraryKind').value,page,purpose:$('libraryPurpose').textContent});active=next;selected=states[active].selected;configureCollection();$('librarySearch').value=states[active].search;$('libraryKind').value=states[active].kind;page=states[active].page;$('libraryPurpose').textContent=states[active].purpose;}else{const kind=$('libraryKind').value;configureCollection();$('libraryKind').value=kind;}}
  render();
 });
 configureCollection();

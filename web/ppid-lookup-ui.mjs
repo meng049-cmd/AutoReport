@@ -12,7 +12,8 @@ function canonical(value){return String(value??'').normalize('NFKC').trim().toLo
 function setStatus(value,error=false){$('ppidStatus').textContent=value;$('ppidStatus').className=error?'warn':'muted';}
 function clearResults(){ $('ppidResults').replaceChildren();$('ppidSummary').textContent='';$('ppidDownload').disabled=true;lastMatches=[];lastPpids=[];lastWarnings=[];lastTruncated=false; }
 function button(label,action){const element=document.createElement('button');element.type='button';element.className='secondary';element.textContent=label;element.onclick=action;return element;}
-function libraryButton(match){return button(match.collection==='analysis'?'查看分析報表':'查看 Detail 比對檔案',()=>window.dispatchEvent(new CustomEvent('library-open-ppid-file',{detail:{id:match.id}})));}
+function libraryButton(match){return button(match.collection==='analysis'?'查看分析報表':match.collection==='mergedDetail'?'查看合併 Detail':'查看 Detail 比對檔案',()=>window.dispatchEvent(new CustomEvent('library-open-ppid-file',{detail:{id:match.id}})));}
+function collectionName(collection=scopeCollection){return collection==='analysis'?'分析報表':collection==='mergedDetail'?'合併 Detail':'Detail 比對';}
 function visibleMatches(){const process=canonical($('ppidProcess').value);return process?lastMatches.filter(item=>canonical(item.process)===process):lastMatches;}
 function resultColumns(matches){const columns=[],seen=new Set();for(const match of matches){const counts=new Map();for(const name of match.headers||[]){const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);const key=JSON.stringify([name,occurrence]);if(!seen.has(key)){seen.add(key);columns.push({name,key});}}}return columns;}
 function rowValues(match,columns){const values=new Map(),counts=new Map();(match.headers||[]).forEach((name,index)=>{const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);values.set(JSON.stringify([name,occurrence]),match.rowData?.[index]??'');});return columns.map(column=>values.get(column.key)??'');}
@@ -24,14 +25,14 @@ function renderResults(ppids,matches,warnings,truncated){
  processSelect.replaceChildren(new Option('全部製程',''),...processes.map(value=>new Option(value,value)));
  if(processes.some(value=>canonical(value)===canonical(previous)))processSelect.value=processes.find(value=>canonical(value)===canonical(previous));
  const found=new Set(matches.map(match=>canonical(match.ppid))),missing=ppids.filter(item=>!found.has(item.canonical));
- const reportCount=visible.filter(item=>item.collection==='analysis').length,detailCount=visible.length-reportCount;
- $('ppidSummary').textContent=`輸入 ${ppids.length} 個 PPID；符合目前製程 ${visible.length} 筆（分析報表 ${reportCount} 筆、Detail 比對 ${detailCount} 筆）；未找到 ${missing.length} 個。`+(truncated?' 已達 10,000 筆結果上限。':'');
+ const reportCount=visible.filter(item=>item.collection==='analysis').length,mergedCount=visible.filter(item=>item.collection==='mergedDetail').length,detailCount=visible.length-reportCount-mergedCount;
+ $('ppidSummary').textContent=`輸入 ${ppids.length} 個 PPID；符合目前製程 ${visible.length} 筆（分析報表 ${reportCount} 筆、Detail 比對 ${detailCount} 筆、合併 Detail ${mergedCount} 筆）；未找到 ${missing.length} 個。`+(truncated?' 已達 10,000 筆結果上限。':'');
  const table=document.createElement('table'),head=table.createTHead().insertRow();
  const columns=resultColumns(visible);
  for(const label of ['查找來源','檔案','分頁／列號',...columns.map(column=>column.name),'返回檔案庫']){const th=document.createElement('th');th.textContent=label;head.append(th);}
  const body=table.createTBody();
  for(const match of visible){const row=body.insertRow();for(const value of [match.source,match.name,`${match.sheet}／${match.row}`,...rowValues(match,columns)])row.insertCell().textContent=value||'—';row.insertCell().append(libraryButton(match));}
- for(const item of missing){const row=body.insertRow();row.className='warn';row.insertCell().textContent=item.label;const cell=row.insertCell();cell.colSpan=columns.length+3;cell.textContent=`所選${scopeCollection==='detail'?'Detail 比對':'分析報表'}檔案庫沒有此 PPID。`;}
+ for(const item of missing){const row=body.insertRow();row.className='warn';row.insertCell().textContent=item.label;const cell=row.insertCell();cell.colSpan=columns.length+3;cell.textContent=`所選${collectionName()}檔案庫沒有此 PPID。`;}
  $('ppidResults').replaceChildren(table);
  $('ppidDownload').disabled=!ppids.length;
  if(warnings.length)setStatus('部分檔案略過：'+warnings.join('；'),true);
@@ -62,8 +63,8 @@ async function search(){
     }catch(error){warnings.push(`${entry.name}：${error.message}`);}
    }
   };
-  if(!files.length)setStatus(`所選${scopeCollection==='detail'?'Detail 比對':'分析報表'}檔案庫沒有可查檔案。`);
-  await scan(files,scopeCollection==='analysis'?'良率與不良分析':'Detail 比對');
+  if(!files.length)setStatus(`所選${collectionName()}檔案庫沒有可查檔案。`);
+  await scan(files,collectionName());
   lastMatches=matches;lastPpids=ppids;lastWarnings=warnings;lastTruncated=truncated;
   renderResults(ppids,matches,warnings,truncated);
  }catch(error){setStatus(error.message,true);}finally{button.disabled=false;button.textContent=cancelText;}
@@ -81,7 +82,7 @@ $('ppidDownload').onclick=async()=>{
   sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter={from:'A1',to:{row:1,column:Math.max(4,4+columns.length)}};
   sheet.getRow(1).font={bold:true};sheet.columns.forEach((column,index)=>{column.width=index<4?20:24;column.numFmt='@';});
   const found=new Set(lastMatches.map(item=>canonical(item.ppid))),missing=lastPpids.filter(item=>!found.has(item.canonical));
-  if(missing.length){const absent=workbook.addWorksheet('未找到 PPID');absent.addRow(['PPID','查找來源']);for(const item of missing)absent.addRow([item.label,scopeCollection==='detail'?'Detail 比對':'分析報表']);absent.getColumn(1).width=36;absent.getColumn(1).numFmt='@';absent.getColumn(2).width=22;absent.getRow(1).font={bold:true};}
+ if(missing.length){const absent=workbook.addWorksheet('未找到 PPID');absent.addRow(['PPID','查找來源']);for(const item of missing)absent.addRow([item.label,collectionName()]);absent.getColumn(1).width=36;absent.getColumn(1).numFmt='@';absent.getColumn(2).width=22;absent.getRow(1).font={bold:true};}
   const bytes=await workbook.xlsx.writeBuffer(),url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),anchor=document.createElement('a');
   anchor.href=url;anchor.download=`AUTOREPORT_PPID查找結果_${new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'})}.xlsx`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
  }catch(error){setStatus('下載失敗：'+error.message,true);}finally{download.disabled=false;}
@@ -89,4 +90,5 @@ $('ppidDownload').onclick=async()=>{
 $('ppidClear').onclick=()=>{$('ppidText').value='';$('ppidExcel').value='';$('ppidProcess').value='';clearResults();setStatus('');};
 $('ppidChooseReports').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'analysis'}}));
 $('ppidChooseDetails').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'detail'}}));
-window.addEventListener('ppid-lookup-files',({detail})=>{const ids=detail?.ids||[];scopeCollection=detail?.collection==='analysis'?'analysis':'detail';scopeIds=ids.length?new Set(ids):null;clearResults();$('ppidProcess').replaceChildren(new Option('全部製程',''));navigate('ppidLookup');setStatus(scopeIds?`查找範圍：已選取 ${ids.length} 份${scopeCollection==='detail'?'Detail 比對':'分析報表'}檔案。`:`查找範圍：全部${scopeCollection==='detail'?'Detail 比對':'分析報表'}檔案。`);});
+$('ppidChooseMergedDetails').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'mergedDetail'}}));
+window.addEventListener('ppid-lookup-files',({detail})=>{const ids=detail?.ids||[];scopeCollection=['analysis','mergedDetail'].includes(detail?.collection)?detail.collection:'detail';scopeIds=ids.length?new Set(ids):null;clearResults();$('ppidProcess').replaceChildren(new Option('全部製程',''));navigate('ppidLookup');setStatus(scopeIds?`查找範圍：已選取 ${ids.length} 份${collectionName()}檔案。`:`查找範圍：全部${collectionName()}檔案。`);});

@@ -14,7 +14,7 @@ export const libraryReady=new Promise(resolve=>{
 function changed(){libraryEvents.dispatchEvent(new Event('change'));}
 function write(mode,action){return new Promise((resolve,reject)=>{if(!db){reject(Error('檔案清單暫存於此分頁'));return;}const tx=db.transaction('files',mode);action(tx.objectStore('files'));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
 export function listLibraryFiles(){return [...entries.values()].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));}
-export function libraryCollection(entry){return ['raw','detail','analysis'].includes(entry.collection)?entry.collection:entry.kind==='raw'?'raw':['analysis','input'].includes(entry.kind)?'analysis':'detail';}
+export function libraryCollection(entry){return ['raw','detail','mergedDetail','analysis'].includes(entry.collection)?entry.collection:entry.kind==='raw'?'raw':['analysis','input'].includes(entry.kind)?'analysis':'detail';}
 export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null,collection,sourceFileId,replaceId}={}){
  await libraryReady;const previous=replaceId?entries.get(replaceId):null;const entry={id:previous?.id||crypto.randomUUID(),name:file.name,blob:file,size:file.size,lastModified:file.lastModified,kind,detail,sources,rows,collection:libraryCollection({kind,collection}),sourceFileId,createdAt:previous?.createdAt||new Date().toISOString(),persistent:true};
  try{await write('readwrite',store=>store.put(entry));}catch{entry.persistent=false;}
