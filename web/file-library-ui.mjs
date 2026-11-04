@@ -35,14 +35,21 @@ $('libraryPpidLookup').onclick=()=>{const items=selection().filter(item=>active=
 $('libraryMerge').onclick=async()=>{
  const items=selection();if(!items.length||items.some(item=>!item.detail)||!['detail','mergedDetail'].includes(active))return;
  const files=items.map(entryFile);if(!beginFileOperation())return;$('libraryPurpose').className='muted';$('libraryPurpose').textContent='準備合併所選 Detail 檔案…';
+ const saved=[];
  try{
-  const data=await mergeDetailFiles(files,message=>{$('libraryPurpose').textContent=message;});
-  const file=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  const entry=await addLibraryFile(file,{kind:'merged',collection:'mergedDetail',sources:entrySources(items),rows:data.output_rows});
-  states.mergedDetail.selected.clear();states.mergedDetail.selected.add(entry.id);states.mergedDetail.search='';states.mergedDetail.kind='';states.mergedDetail.page=0;
-  states.mergedDetail.purpose=`合併完成：Detail 日期區間 ${data.start_date} 至 ${data.end_date}，已新增「${data.filename}」至合併 Detail 比對檔案庫。`;
+  const data=await mergeDetailFiles(files,message=>{$('libraryPurpose').textContent=message;},async part=>{
+   const file=new File([part.bytes],part.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+   const entry=await addLibraryFile(file,{kind:'merged',collection:'mergedDetail',sources:entrySources(items),rows:part.output_rows});
+   saved.push(entry);
+   $('libraryPurpose').textContent=`已保存分檔 ${saved.length}：${part.filename}（${(part.bytes_size/1024/1024).toFixed(1)} MB）`;
+  });
+  states.mergedDetail.selected.clear();for(const entry of saved)states.mergedDetail.selected.add(entry.id);states.mergedDetail.search='';states.mergedDetail.kind='';states.mergedDetail.page=0;
+  states.mergedDetail.purpose=`合併完成：已處理 ${data.input_files} 份來源檔，Detail 日期區間 ${data.start_date} 至 ${data.end_date}，共產生 ${data.output_files} 個分檔並存入合併 Detail 比對檔案庫。`;
   navigate('mergedDetail');$('libraryPurpose').className='ok';$('libraryPurpose').textContent=states.mergedDetail.purpose;
- }catch(error){$('libraryPurpose').className='warn';$('libraryPurpose').textContent=error.message;}
+ }catch(error){
+  if(saved.length)try{await removeLibraryFiles(saved.map(entry=>entry.id));}catch{}
+  $('libraryPurpose').className='warn';$('libraryPurpose').textContent=error.message;
+ }
  finally{endFileOperation();}
 };
 $('libraryDownload').onclick=async()=>{const items=selection();if(!items.length)return;const button=$('libraryDownload');button.disabled=true;try{const zip=new JSZip(),used=new Set();for(const item of items){let name=item.name,index=2;const dot=item.name.lastIndexOf('.'),base=dot>0?item.name.slice(0,dot):item.name,extension=dot>0?item.name.slice(dot):'';while(used.has(name.toLowerCase()))name=base+'_'+index+++extension;used.add(name.toLowerCase());zip.file(name,item.blob);}const url=URL.createObjectURL(await zip.generateAsync({type:'blob',compression:'STORE'})),link=document.createElement('a');link.href=url;link.download='AutoReport_檔案清單.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}catch(error){$('libraryPurpose').textContent=error.message;}finally{updateActions();}};

@@ -83,28 +83,32 @@
       for(const key of defectKeys)this.defectKeys.add(key);
     }
     hasDefect(value) {return this.defectKeys.has(value.key||JSON.stringify([value.day,String(value.row[0]).trim(),String(value.row[4]).trim()]));}
-    finish({dense=false,analysisOnly=false}={}) {
+    finish({dense=false,analysisOnly=false,selectedRows,includeSkippedRows=true}={}) {
       if (!this.rows.size) throw new Error(this.skippedRows.length?`已略過 ${this.skippedRows.length} 列錯誤資料，Detail 沒有可分析的有效資料。`:'Detail 沒有可合併的資料。');
-      if (!analysisOnly && this.rows.size > 1048575) throw new Error('合併結果超過 Excel 單一分頁的列數上限，請減少上傳檔案。');
-      const XLSX = this.XLSX, rows = [...this.rows.values()].sort((a,b) => a.timestamp - b.timestamp);
+      const XLSX = this.XLSX, rows = [...(selectedRows||this.rows.values())].sort((a,b) => a.timestamp - b.timestamp);
+      if(!rows.length)throw new Error('此日期區間沒有可合併的 Detail 資料。');
+      if (!analysisOnly && rows.length > 1048575) throw new Error('合併分檔超過 Excel 單一分頁列數上限，請稍後重試。');
+      const rowKeys=new Set(rows.map(value=>value.key)),inside=record=>rowKeys.has(JSON.stringify([record.date,record.process,record.serial]));
+      const firstNG=[...this.firstNG.values()].filter(inside),analysisFirstNG=[...this.analysisFirstNG.values()].filter(inside);
+      const skippedRows=includeSkippedRows?this.skippedRows:[];
       const first = rows[0].day, last = rows.at(-1).day;
       // Same Sunday–Saturday reporting calendar as web/defect-analysis.mjs.
       const dayMs=86400000,date=new Date(`${first}T00:00:00Z`),weekStart=+date-date.getUTCDay()*dayMs;
       const yearStart=y=>{const jan11=Date.UTC(y,0,11);return jan11+((7-new Date(jan11).getUTCDay())%7)*dayMs;};
       let year=date.getUTCFullYear();if(weekStart<yearStart(year))year--;
       const week=Math.floor((weekStart-yearStart(year))/(7*dayMs))+1;
-      const filename = `${year}_w${week}_${first.slice(5).replace('-','')}-${last.slice(5).replace('-','')}.xlsx`;
+      const filename = `${year}_w${week}_${first}-${last}.xlsx`;
       const sheet = analysisOnly?null:XLSX.utils.aoa_to_sheet([this.header, ...rows.map(value => value.row)],{dense});
       for (let i = 1; sheet && i <= rows.length; i++) {
         const cell = Array.isArray(sheet)?sheet[i]?.[this.time]:sheet[XLSX.utils.encode_cell({r:i,c:this.time})];
         if (cell) cell.z = 'yyyy-mm-dd hh:mm:ss';
       }
       const book = XLSX.utils.book_new(); if(sheet)XLSX.utils.book_append_sheet(book, sheet, 'Detail');
-      book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.firstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
-      book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:[...this.analysisFirstNG.values()].map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
+      book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:firstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
+      book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:analysisFirstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
-      if(this.skippedRows.length)book.Custprops.AutoReportSkippedRows=JSON.stringify(this.skippedRows).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
-      return {book, filename, input_rows: this.total, output_rows: rows.length, removed_rows: this.total - rows.length, skipped_rows:this.skippedRows.length, start_date: first, end_date: last};
+      if(skippedRows.length)book.Custprops.AutoReportSkippedRows=JSON.stringify(skippedRows).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
+      return {book, filename, input_rows: selectedRows?rows.length:this.total, output_rows: rows.length, removed_rows: selectedRows?0:this.total - rows.length, skipped_rows:skippedRows.length, start_date: first, end_date: last};
     }
   }
   root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
