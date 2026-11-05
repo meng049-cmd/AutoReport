@@ -43,7 +43,7 @@ function closeTrendProductDetails(restoreFocus=false){
  if(restoreFocus)trendDetailsTrigger?.focus();
  trendDetailsTrigger=null;
 }
-function renderTrendProductChart(rows,color){
+export function renderTrendProductChart(rows,color,host=$('trendProductDetailTable'),periodTotals=false){
  const maxRate=rows.reduce((max,row)=>Math.max(max,row.rate??0),0);
  const step=Math.max(.0001,maxRate/4);
  const magnitude=10**Math.floor(Math.log10(step));
@@ -55,7 +55,7 @@ function renderTrendProductChart(rows,color){
  table.setAttribute('aria-label','機種／IC 不良率橫向長條圖');
  if(color)table.style.setProperty('--trend-bar-color',color);
  const head=table.createTHead().insertRow();
- for(const label of ['機種','IC','投入 PPID','不良 PPID','不良率']){
+ for(const label of ['機種','IC',periodTotals?'投入 PPID 合計':'投入 PPID',periodTotals?'不良 PPID 合計':'不良 PPID',periodTotals?'合計不良率':'不良率']){
   const th=document.createElement('th');
   th.scope='col';
   th.textContent=label;
@@ -90,7 +90,7 @@ function renderTrendProductChart(rows,color){
   layout.append(track,value);
   tr.insertCell().append(layout);
  }
- $('trendProductDetailTable').append(table);
+ host.append(table);
 }
 function showTrendProductDetails(series,bucket,trigger){
  closeTrendProductDetails();

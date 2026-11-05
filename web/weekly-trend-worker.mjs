@@ -37,21 +37,22 @@ function summarize(analysis){
  return {input:analysis.total,count:analysis.fail,products,processes};
 }
 
-self.onmessage=async({data:{period,sources,skipInvalidRows}})=>{
+self.onmessage=async({data:{period,sources,skipInvalidRows,mode}})=>{
+ const label=mode==='day'?'當日':'本週';
  try{
   const merger=new globalThis.DetailMerger(null,{skipInvalidRows});
   for(const source of sources){
-   if(source.rows>MAX_ROWS)throw Error(source.name+' 在本週超過 30 萬筆索引紀錄。');
+   if(source.rows>MAX_ROWS)throw Error(source.name+' 在'+label+'超過 30 萬筆索引紀錄。');
    const meta=await index.meta(source.key);
    if(!meta?.complete)throw Error(source.name+' 的日期索引尚未完成。');
    merger.prepareIndexed(meta,period);
    await index.scan(source.key,period,value=>{
     merger.addIndexed(value);
-    if(merger.rows.size>MAX_ROWS)throw Error('本週去重後仍超過 30 萬筆過站紀錄。');
+    if(merger.rows.size>MAX_ROWS)throw Error(label+'去重後仍超過 30 萬筆過站紀錄。');
    });
    merger.completeIndexed();
   }
   const summary=summarize(globalThis.analyzeQuality(merger));
   self.postMessage({summary,skipped:merger.skippedRows.length});
- }catch(error){self.postMessage({error:error.message||'無法計算本週推移。'});}
+ }catch(error){self.postMessage({error:error.message||'無法計算'+label+'推移。'});}
 };
