@@ -5,6 +5,7 @@ import '../merge-core.js';
 import {MAX_BYTES,MAX_ROWS,MAX_COLUMNS} from './limits.mjs';
 export {MAX_BYTES} from './limits.mjs';
 import {text,role,matchTables} from './matcher.mjs';
+import {matchCorrectionIdentity} from './match-corrections.mjs';
 
 function csvRows(s){
   const rows=[];let row=[],value='',quoted=false,column=0;
@@ -53,19 +54,23 @@ export async function inputTables(bytes,filename,{analysisOnly=false}={}){
   });
 }
 
-export async function matchFile(matcher,bytes,filename,{analysisOnly=false}={}){
+export async function matchFile(matcher,bytes,filename,{analysisOnly=false,forceCorrectionKeys=[]}={}){
   const tables=await inputTables(bytes,filename,{analysisOnly});
   const detail=tables.find(t=>t.name==='Detail');
   if(!detail)return matchTables(matcher,tables,filename);
   if(analysisOnly&&(detail.raw[0]?.[0]!=='製程'||detail.raw[0]?.[4]!=='小板序號'||detail.raw[0]?.[5]!=='產出時間'||detail.raw[0]?.[8]!=='狀態'))throw Error('Detail 欄位須為 A製程、E小板序號、F產出時間、I狀態，請確認原始檔欄位。');
-  const results=[],lookups=new Map();
+  const results=[],lookups=new Map(),forcedCorrections=new Set(forceCorrectionKeys);
   for(let i=1;i<detail.raw.length;i++){
     const row=detail.raw[i]||[];if(!row.slice(0,9).some(Boolean))continue;
     if(row.slice(9,11).some(Boolean)||detail.existingMatchRows?.has(i))throw Error(`Detail 第 ${i+1} 列 J/K 已有資料，請先確認，避免覆蓋。`);
     const criteria=[['order',detail.expanded[i][1]],['part',detail.expanded[i][2]]].filter(([,v])=>v);
     const key=JSON.stringify(criteria);if(!lookups.has(key))lookups.set(key,matcher.lookup(criteria));const match=lookups.get(key),unique=match['狀態']==='唯一匹配'?match['候選'][0]:{};
     const original=detail.nativeRows.get(i);if(original){original[0]=globalThis.canonicalAnalysisProcess(original[0]);for(const c of [1,2])if(original[c]==null||original[c]==='')original[c]=detail.expanded[i][c]||null;}
-    results.push({...(original?{compactValues:original}:{}),'分頁':'Detail','列號':i+1,'原始資料':row.slice(0,9),'機種':unique['機種']||'',IC:unique.IC||'',...match});
+    const resultRow={...(original?{compactValues:original}:{}),'分頁':'Detail','列號':i+1,'原始資料':row.slice(0,9),'機種':unique['機種']||'',IC:unique.IC||'',...match};
+    if(match['狀態']==='唯一匹配'&&forcedCorrections.has(matchCorrectionIdentity({檔名:filename},resultRow).key)){
+      resultRow['原比對狀態']=resultRow['狀態'];resultRow['狀態']='PPID對照衝突';resultRow.IC='';resultRow['機種']='';
+    }
+    results.push(resultRow);
   }
   return {'檔名':filename,'筆數':results.length,'提示':[analysisOnly?'只保留六個分析製程與 A–K 必要欄位，原始檔完整保留於 Raw Data 檔案庫。':'僅比對 Detail 的 B（工單）／C（料號）；下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。'],'結果':results,...(analysisOnly?{compactDetail:true,excludedRows:detail.excludedRows}:{detailBytes:bytes})};
 }

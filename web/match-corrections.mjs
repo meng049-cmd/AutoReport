@@ -45,6 +45,8 @@ function identity(result,row){
  return {key,order,part,query:criteria.map(([,value])=>value).join('／')};
 }
 
+export function matchCorrectionIdentity(result,row){return identity(result,row);}
+
 export function summarizeMatchCorrections(result){
  const groups=new Map();
  for(const row of result['結果']){
@@ -55,6 +57,19 @@ export function summarizeMatchCorrections(result){
   group.statuses.add(row['狀態']);group.sheets.add(row['分頁']);
  }
  return [...groups.values()].map(group=>({...group,statuses:[...group.statuses],sheets:[...group.sheets]}));
+}
+
+export function summarizeResolvedPPIDMappings(result){
+ const groups=new Map();
+ for(const row of result['結果']){
+  if(!['唯一匹配','手動補填'].includes(row['狀態'])||!needsStageCorrection(row))continue;
+  const serial=text(row.compactValues?.[4]??row['原始資料']?.[4]),ic=text(row.IC),model=text(row['機種']);
+  if(!serial||(!ic&&!model))continue;
+  const item=identity(result,row),key=JSON.stringify([serial,item.key,ic,model]);
+  if(!groups.has(key))groups.set(key,{serial,...item,ic,model,rows:0});
+  groups.get(key).rows++;
+ }
+ return [...groups.values()];
 }
 
 export function applyMatchCorrections(result,corrections=[],options={}){
@@ -68,7 +83,6 @@ export function applyMatchCorrections(result,corrections=[],options={}){
  }
  if(!updates.size)return result;
  for(const row of result['結果']){
-  if(row['狀態']==='唯一匹配')continue;
   const update=updates.get(identity(result,row).key);if(!update)continue;
   const source={'檔案':'本批次手動補填','分頁':row['分頁'],'列號':row['列號']};
   row['原比對狀態']=row['狀態'];row['狀態']='手動補填';row.IC=update.ic;row['機種']=update.model;

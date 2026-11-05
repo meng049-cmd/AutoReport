@@ -28,6 +28,36 @@ function collectMatchCorrections(items,filename){
   const group=correctionGroups.get(item.key);group.rows+=item.rows;group.pending+=item.pending;item.statuses.forEach(status=>group.statuses.add(status));group.files.add(filename);
  }
 }
+function recordPPIDMappingConflicts(items,index,states,conflicts){
+ for(const item of items||[]){
+  let state=states.get(item.serial);
+  const pairLabel=`${item.ic||'IC未填'}／${item.model||'機種未填'}`;
+  const add=(target,key,fileIndex,label)=>{if(!target.groups.has(key))target.groups.set(key,new Set());target.groups.get(key).add(fileIndex);target.mappings.add(label);};
+  if(!state){states.set(item.serial,state={ic:item.ic,model:item.model,key:item.key,index,firstIC:item.ic,firstModel:item.model,extras:[],conflicted:false});continue;}
+  const mismatch=Boolean(item.ic&&state.ic&&item.ic!==state.ic)||Boolean(item.model&&state.model&&item.model!==state.model);
+  if(!state.ic&&item.ic)state.ic=item.ic;if(!state.model&&item.model)state.model=item.model;
+  if(state.conflicted)add(state,item.key,index,pairLabel);
+  else if(mismatch){
+   state.conflicted=true;state.groups=new Map();state.mappings=new Set();
+   add(state,state.key,state.index,`${state.firstIC||'IC未填'}／${state.firstModel||'機種未填'}`);
+   for(const extra of state.extras)add(state,extra.key,extra.index,extra.label);
+   add(state,item.key,index,pairLabel);
+  }else if(item.key!==state.key||index!==state.index)state.extras.push({key:item.key,index,label:pairLabel});
+  if(!state.conflicted)continue;
+  for(const [key,indices] of state.groups){
+   if(!conflicts.has(key))conflicts.set(key,{ppids:new Set(),mappings:new Set(),indices:new Set()});
+   const conflict=conflicts.get(key);conflict.ppids.add(item.serial);state.mappings.forEach(value=>conflict.mappings.add(value));indices.forEach(fileIndex=>conflict.indices.add(fileIndex));
+  }
+ }
+}
+function rebuildCorrectionGroups(reports,conflicts,files){
+ correctionGroups.clear();
+ for(const [index,items] of reports)collectMatchCorrections(items,files[index].name);
+ for(const [key,detail] of conflicts){
+  const group=correctionGroups.get(key);if(!group)continue;
+  group.conflictPPIDs=new Set(detail.ppids);group.conflictMappings=new Set(detail.mappings);group.statuses.add('PPID對照衝突');
+ }
+}
 function renderCorrectionField(kind,index,value){
  const label=kind==='ic'?'IC':'機種',options=kind==='ic'?matchOptions.ics:matchOptions.models,current=value[kind]||'',selected=options.indexOf(current);
  const custom=value[kind+'Mode']==='new'||(Boolean(current)&&selected<0);
@@ -38,12 +68,15 @@ function renderMatchCorrections(){
  const groups=[...correctionGroups.values()];$('matchCorrections').hidden=!groups.length;
  if(!groups.length)return;
  const pending=groups.reduce((sum,group)=>sum+group.pending,0),filled=groups.reduce((sum,group)=>sum+group.rows-group.pending,0);
- $('matchCorrectionSummary').textContent=`共 ${groups.length} 組工單／料號，${pending} 筆待補填、${filled} 筆已手動補填。僅列出前段／後段階段計算製程（DAF外觀、DAF熱壓投入、功能一測試、功能二測試、外觀檢查點亮測試、輝度機測試）；其他製程不需補填。請完整填寫列出的 IC 與機種。`;
+ const conflictGroups=groups.filter(group=>group.conflictPPIDs?.size).length;
+ $('matchCorrectionSummary').textContent=`共 ${groups.length} 組工單／料號，${pending} 筆待補填、${filled} 筆已手動補填。${conflictGroups?`${conflictGroups} 組因同一 PPID 對到不同 IC／機種，已改列手動確認。`:''}僅列出六個分析製程（DAF外觀、DAF熱壓投入、功能一測試、功能二測試、外觀檢查點亮測試、輝度機測試）；其他製程不需補填。請完整填寫列出的 IC 與機種。`;
  correctionPage=Math.min(correctionPage,Math.ceil(groups.length/50)-1);const offset=correctionPage*50;
  $('matchCorrectionPage').textContent=`第 ${correctionPage+1}／${Math.ceil(groups.length/50)} 頁 · 共 ${groups.length} 組`;$('matchCorrectionPrev').disabled=correctionPage===0;$('matchCorrectionNext').disabled=offset+50>=groups.length;
- $('matchCorrectionTable').innerHTML=table(['工單號碼','料號／查找值','來源檔案','筆數','比對狀態','IC','機種'],groups.slice(offset,offset+50).map((group,position)=>{
+ $('matchCorrectionTable').innerHTML=table(['工單號碼','料號／查找值','來源檔案','筆數','比對狀態','衝突 PPID','目前觀察到對照','IC','機種'],groups.slice(offset,offset+50).map((group,position)=>{
   const index=offset+position,value=correctionDrafts.get(group.key)||batchCorrections.get(group.key)||{};
-  return [esc(group.order||'未提供工單'),esc(group.part||(!group.order?group.query:'')||'—'),[...group.files].map(esc).join('<br>'),String(group.rows),[...group.statuses].map(esc).join('<br>'),renderCorrectionField('ic',index,value),renderCorrectionField('model',index,value)];
+  const serials=[...(group.conflictPPIDs||[])];
+  const mappings=[...(group.conflictMappings||[])];
+  return [esc(group.order||'未提供工單'),esc(group.part||(!group.order?group.query:'')||'—'),[...group.files].map(esc).join('<br>'),String(group.rows),[...group.statuses].map(esc).join('<br>'),serials.length?esc(serials.slice(0,8).join('、'))+(serials.length>8?`<br>另 ${serials.length-8} 個`:''):'—',mappings.length?mappings.map(esc).join('<br>'):'—',renderCorrectionField('ic',index,value),renderCorrectionField('model',index,value)];
  }));
 }
 
@@ -59,29 +92,43 @@ async function archiveRawFiles(files){
 async function matchFiles(files,{archive=true,regenerate=false,sourceFileIds=[]}={}){
  if(!files.length){error(Error('請先選擇檔案。'));return;}
  if(!beginFileOperation())return;if(!regenerate)resetMatchCorrections(files);correctionGroups.clear();$('matchCorrectionFields').disabled=true;$('match').disabled=true;$('file').disabled=true;clearDownload();$('uploadResults').innerHTML='';$('message').className='';
- const used=new Set();let failed=0,total=0;const reports=[];
+ const used=new Set(),outputNames=new Map(),correctionReports=new Map(),mappingStates=new Map(),conflicts=new Map();let failed=0,total=0;const reports=[];
+ async function saveMatchOutput(index,file,r){
+  if(!r['筆數'])return;
+  const base='AUTOREPORT 工單查找與品質分析_'+file.name.replace(/\.(xlsx|csv)$/i,'')+'_IC機種';let name=outputNames.get(index);
+  if(!name){name=base+'.xlsx';let suffix=2;while(used.has(name.toLowerCase()))name=base+'_'+suffix+++'.xlsx';used.add(name.toLowerCase());outputNames.set(index,name);}
+  const output=await call('export'),blob=new File([output],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),existing=downloads.findIndex(item=>item.index===index);
+  if(existing>=0){URL.revokeObjectURL(downloads[existing].url);downloads.splice(existing,1);}
+  downloads.push({index,name,blob,url,detail:r.detail});
+  const sourceFileId=batchSourceIds[index],previous=sourceFileId?listLibraryFiles().find(item=>item.kind==='matched'&&item.sourceFileId===sourceFileId):null;
+  const entry=await addLibraryFile(blob,{kind:'matched',detail:r.detail,sourceFileId,rows:r['筆數'],replaceId:batchEntries.get(index)||(regenerate?undefined:previous?.id),sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});batchEntries.set(index,entry.id);
+ }
  try{
  if(!regenerate)batchSourceIds=archive?await archiveRawFiles(files):sourceFileIds;
  for(let index=0;index<files.length;index++){
   const file=files[index];$('message').textContent=`正在處理 ${index+1}/${files.length}：${file.name}`;
   try{
    const bytes=await file.arrayBuffer();const r=await call('match',{bytes,filename:file.name,corrections:[...batchCorrections.values()]},[bytes]);
-   collectMatchCorrections(r.corrections,file.name);
+   correctionReports.set(index,r.corrections||[]);recordPPIDMappingConflicts(r.identityMappings,index,mappingStates,conflicts);
    const summary='完成 '+r['筆數']+(r.detail?' 筆六製程資料（已排除 '+(r.excludedRows||0)+' 筆其他製程）：':' 筆：')+Object.entries(r.counts).map(([k,v])=>k+' '+v+' 筆').join('、');
    total+=r['筆數'];
    if(r['筆數']){
     $('message').textContent=`正在準備下載 ${index+1}/${files.length}：${file.name}`;
-    const output=await call('export');const base='AUTOREPORT 工單查找與品質分析_'+file.name.replace(/\.(xlsx|csv)$/i,'')+'_IC機種';let name=base+'.xlsx',suffix=2;
-    while(used.has(name.toLowerCase()))name=base+'_'+suffix+++'.xlsx';used.add(name.toLowerCase());
-    const blob=new File([output],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const item={name,blob,url:URL.createObjectURL(blob),detail:r.detail};downloads.push(item);
-    const sourceFileId=batchSourceIds[index],previous=sourceFileId?listLibraryFiles().find(item=>item.kind==='matched'&&item.sourceFileId===sourceFileId):null;
-    const entry=await addLibraryFile(blob,{kind:'matched',detail:r.detail,sourceFileId,rows:r['筆數'],replaceId:regenerate?batchEntries.get(index):previous?.id,sources:[{name:file.name,size:file.size,kind:r.detail?'Detail':'查詢檔'}]});batchEntries.set(index,entry.id);
+    await saveMatchOutput(index,file,r);
    }
    if(files.length===1)$('message').textContent=summary+(r['筆數']?'；已加入檔案庫，可勾選、取消勾選或刪除。':'');
   }catch(e){failed++;reports.push(file.name+'：'+e.message);if(files.length===1)error(e);}
   if(reports.length){$('message').textContent=reports.join('；');$('message').className='warn';}
  }
+ const forcedKeys=[...conflicts.keys()],affectedIndexes=new Set([...conflicts.values()].flatMap(detail=>[...detail.indices]));
+ for(const index of affectedIndexes){
+  const file=files[index];$('message').textContent=`正在將同 PPID 對照不一致的資料列轉入手動補填：${file.name}`;
+  try{
+   const bytes=await file.arrayBuffer(),r=await call('match',{bytes,filename:file.name,corrections:[...batchCorrections.values()],forceCorrectionKeys:forcedKeys},[bytes]);
+   correctionReports.set(index,r.corrections||[]);await saveMatchOutput(index,file,r);
+  }catch(e){failed++;reports.push(file.name+'（衝突列轉手動補填失敗）：'+e.message);}
+ }
+ rebuildCorrectionGroups(correctionReports,conflicts,files);
  $('export').disabled=!downloads.length;$('export').textContent=downloads.length>1?'下載全部結果（ZIP）':'匯出 Excel';
  if(files.length>1)$('message').textContent=`批次完成 ${files.length} 個檔案，共 ${total} 筆；可下載 ${downloads.length} 份結果，失敗 ${failed} 個檔案；已加入檔案庫 ${downloads.length} 份。`+(reports.length?' '+reports.join('；'):'');
  const unresolved=[...correctionGroups.values()].reduce((sum,group)=>sum+group.pending,0);
