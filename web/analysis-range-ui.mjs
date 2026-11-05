@@ -1,6 +1,7 @@
 import {libraryReady,libraryEvents,listLibraryFiles,libraryCollection,entryFile,entrySources,libraryIsBusy,beginFileOperation,endFileOperation} from './file-library.mjs';
 import {existingIndex,indexDetailFiles,indexKey,periods} from './detail-index.mjs';
 import {analyzeYieldFiles,getYieldOptions} from './yield-ui.mjs';
+import {runWeeklyTrend} from './weekly-trend-ui.mjs';
 const $=id=>document.getElementById(id),metas=new Map(),choices=new Map();
 let range=null,selected=[],signature='',refreshing=false,indexing=false,controller;
 const entries=()=>listLibraryFiles().filter(item=>item.detail&&libraryCollection(item)===$('yieldRangeSource').value);
@@ -8,7 +9,7 @@ function validMeta(item){const meta=metas.get(item.id);return meta?.key===indexK
 function update(){
  const files=entries(),indexed=files.filter(validMeta),busy=libraryIsBusy()||refreshing;
  for(const id of ['yieldRangeSource','yieldRangeMode','yieldRangeStart','yieldRangeEnd','yieldIndexDates'])$(id).disabled=busy;
- $('yieldCalculate').disabled=busy||!range||!selected.length||indexed.length!==files.length;
+ $('weeklyTrendCalculate').disabled=$('yieldCalculate').disabled=busy||!range||!selected.length||indexed.length!==files.length;
  $('yieldIndexDates').disabled=busy||!files.length;
  if(indexing)return;
  const count=range?selected.reduce((n,item)=>n+periods.rowsIn(validMeta(item),range),0):0;
@@ -48,5 +49,15 @@ $('yieldCalculate').onclick=()=>{
  if(!range||!selected.length)return;
  if(entries().some(item=>validMeta(item)?.invalidRows)&&!getYieldOptions().skipInvalidRows){$('yieldMessage').textContent='索引含有錯誤列，請修正來源；如要排除錯誤列，請明確啟用「略過錯誤列」。';return;}
  analyzeYieldFiles(selected.map(entryFile),{fileIds:selected.map(item=>item.id),sources:entrySources(selected),fromLibrary:true,period:range});
+};
+$('weeklyTrendCalculate').onclick=async()=>{
+ if(!range||!selected.length||!beginFileOperation())return;
+ const {skipInvalidRows}=getYieldOptions(),toggle=$('yieldSkipErrors'),disabled=toggle.disabled;
+ toggle.disabled=true;
+ try{
+  const sources=selected.map(item=>({id:item.id,...validMeta(item)}));
+  await runWeeklyTrend(range,sources,entrySources(selected),{skipInvalidRows});
+ }catch(error){$('weeklyTrendStatus').textContent=error.message;}
+ finally{toggle.disabled=disabled;endFileOperation();}
 };
 libraryEvents.addEventListener('change',()=>refresh());libraryReady.then(()=>refresh(true));

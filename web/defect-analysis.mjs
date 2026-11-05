@@ -118,11 +118,11 @@ export function stageComparisonRows(analysis,filters={}){
  return buckets.flatMap(bucket=>(['前段','後段'].includes(filters.stage)?[filters.stage]:['前段','後段']).map(stage=>({...bucket,stage,...summarizeStage(groups.get(bucket.key)||[],stage)}))).filter(row=>row.input>0);
 }
 
-function addTrendProcessUnit(units,row){
+export function addTrendProcessUnit(units,row){
  const old=units.get(row.serial);
  if(!old||(!old.fail&&row.fail)||(row.fail&&row.status==='FAIL'&&old.status!=='FAIL'))units.set(row.serial,row);
 }
-const trendDefectName=row=>row.defect||'【未填不良項目】';
+export const trendDefectName=row=>row.defect||'【未填不良項目】';
 
 /** Use the same PPID selection as each plotted period, then deduplicate the detail range. */
 export function trendProductBreakdown(analysis,filters,series,bucket){

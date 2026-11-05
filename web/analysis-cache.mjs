@@ -25,3 +25,15 @@ export async function saveAnalysisCache(reportId,data,{selectionKey,inputIds=[],
 }
 export async function removeAnalysisCaches(ids){const removed=new Set(ids);epoch++;const matches=record=>removed.has(record.reportId)||(record.inputIds||[]).some(id=>removed.has(id));for(const [key,record] of memory)if(matches(record))memory.delete(key);await ready;try{await transaction('readwrite',store=>{for(const id of removed)for(const index of ['reportId','inputIds']){const request=store.index(index).openKeyCursor(IDBKeyRange.only(id));request.onsuccess=()=>{const cursor=request.result;if(!cursor)return;store.delete(cursor.primaryKey);cursor.continue();};}});}catch{}}
 export async function clearAnalysisCaches(){epoch++;memory.clear();await ready;try{await transaction('readwrite',store=>store.clear());}catch{}}
+
+export async function getWeeklyTrendCache(key){
+ const record=await read('weekly-trend:'+key);
+ return record?.weeklyVersion===__WEEKLY_TREND_VERSION__?record.data:null;
+}
+export async function saveWeeklyTrendCache(key,data,inputIds){
+ const generation=epoch,record={key:'weekly-trend:'+key,version:version(),weeklyVersion:__WEEKLY_TREND_VERSION__,inputIds,data};
+ remember(record);
+ await ready;
+ if(generation!==epoch)return false;
+ try{await transaction('readwrite',store=>store.put(record));return Boolean(db);}catch{return false;}
+}
