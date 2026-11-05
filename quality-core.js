@@ -20,7 +20,9 @@ function analyzeQuality(merger){
   if(first){unit.fail=true;unit.primary={timestamp:first.timestamp,date:first.date,process:processName(first.process),defect:first.defect,status:first.status,order:first.order||''};}
   const mappings=[...unit.mappings.values()],ics=[...new Set(mappings.map(m=>m.ic).filter(Boolean))],models=[...new Set(mappings.map(m=>m.model).filter(Boolean))];
   const conflict=ics.length>1||models.length>1;
-  const ic=conflict?'【產品對照衝突】':ics[0]||'',model=conflict?'【待確認機種】':models[0]||'',product=JSON.stringify([ic,model]);unit.product=product;
+  // Never invent a product identity when one PPID has contradictory mappings.
+  // Keep any unambiguous half of the mapping and leave only the conflicting field pending.
+  const ic=ics.length===1?ics[0]:'',model=models.length===1?models[0]:'',product=JSON.stringify([ic,model]);unit.product=product;
   if(conflict)identityConflicts.push({serial:unit.serial,mappings,records:unit.records});
   if(!products.has(product))products.set(product,{id:product,ic:ic||'【待補 IC】',model:model||'【待補機種】',pending:conflict||!ic||!model,units:new Set()});
   products.get(product).units.add(unit.serial);
