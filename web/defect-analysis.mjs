@@ -116,13 +116,52 @@ export function stageComparisonRows(analysis,filters={}){
  return buckets.flatMap(bucket=>(['前段','後段'].includes(filters.stage)?[filters.stage]:['前段','後段']).map(stage=>({...bucket,stage,...summarizeStage(groups.get(bucket.key)||[],stage)}))).filter(row=>row.input>0);
 }
 
+function addTrendProcessUnit(units,row){
+ const old=units.get(row.serial);
+ if(!old||(!old.fail&&row.fail)||(row.fail&&row.status==='FAIL'&&old.status!=='FAIL'))units.set(row.serial,row);
+}
+const trendDefectName=row=>row.defect||'【未填不良項目】';
+
+/** Use the same PPID selection as each plotted period, then deduplicate the detail range. */
+export function trendProductBreakdown(analysis,filters,series,bucket){
+ const scope={...filters,date:bucket?.key||'',defect:'',process:series.process||filters.process};
+ const products=new Map(analysis.products.map(product=>[product.id,product])),groups=new Map();
+ function groupFor(row){
+  if(!groups.has(row.product)){
+   const product=products.get(row.product);
+   groups.set(row.product,{ic:product?.ic||row.ic||'【待補 IC】',model:product?.model||row.model||'【待補機種】',inputs:new Set(),defects:new Set()});
+  }
+  return groups.get(row.product);
+ }
+ const rows=filteredObservations(analysis,scope);
+ if(series.process){
+  const periods=new Map();
+  for(const row of rows){
+   if(row.attributionOnly)continue;
+   const key=periodKey(row.date,scope.granularity);
+   if(!periods.has(key))periods.set(key,new Map());
+   addTrendProcessUnit(periods.get(key),row);
+  }
+  for(const units of periods.values())for(const row of units.values()){
+   const group=groupFor(row);
+   group.inputs.add(row.serial);
+   if(row.fail&&trendDefectName(row)===series.defectName)group.defects.add(row.serial);
+  }
+ }else{
+  for(const row of rows)groupFor(row).inputs.add(row.serial);
+  for(const row of attributedRows(analysis,{...scope,defect:series.defect}))groupFor(row).defects.add(row.serial);
+ }
+ return [...groups.values()].filter(group=>group.defects.size).map(({ic,model,inputs,defects})=>({
+  ic,model,input:inputs.size,count:defects.size,rate:inputs.size?defects.size/inputs.size:null
+ })).sort((a,b)=>b.count-a.count||a.model.localeCompare(b.model,'zh-Hant')||a.ic.localeCompare(b.ic,'zh-Hant'));
+}
+
 function stageDefectTrend(analysis,filters){
  const buckets=scopedBuckets(filters.startDate||analysis.start_date,filters.endDate||analysis.end_date,filters),rows=filteredObservations(analysis,{...filters,date:'',defect:''}),groups=new Map(),definitions=new Map();
- const add=(map,row)=>{const old=map.get(row.serial);if(!old||(!old.fail&&row.fail)||(row.fail&&row.status==='FAIL'&&old.status!=='FAIL'))map.set(row.serial,row);};
  for(const row of rows){if(row.attributionOnly||!isStageProcess(row.process,filters.stage))continue;const key=periodKey(row.date,filters.granularity),group=groups.get(key)||[];group.push(row);groups.set(key,group);}
  const data=buckets.map(bucket=>{const rows=groups.get(bucket.key)||[],metrics=summarizeStage(rows,filters.stage),processes=new Map(),counts=new Map();
-  for(const row of rows){const units=processes.get(row.process)||new Map();add(units,row);processes.set(row.process,units);}
-  for(const [process,units] of processes)for(const row of units.values())if(row.fail){const defectName=row.defect||'【未填不良項目】',key=JSON.stringify([process,defectName]);definitions.set(key,{key,process,defectName,item:defectName,defect:process+'｜'+defectName});counts.set(key,(counts.get(key)||0)+1);}
+  for(const row of rows){const units=processes.get(row.process)||new Map();addTrendProcessUnit(units,row);processes.set(row.process,units);}
+  for(const [process,units] of processes)for(const row of units.values())if(row.fail){const defectName=trendDefectName(row),key=JSON.stringify([process,defectName]);definitions.set(key,{key,process,defectName,item:defectName,defect:process+'｜'+defectName});counts.set(key,(counts.get(key)||0)+1);}
   return {...bucket,...metrics,rate:null,counts,processes};
  }).filter(date=>date.input>0);
  const series=[...definitions].sort((a,b)=>a[0].localeCompare(b[0])).map(([key,definition])=>({...definition,points:data.map(({counts,processes,...row})=>{const input=processes.get(definition.process)?.size||0,count=counts.get(key)||0;return {...row,scopeInput:row.input,input,count,rate:input?count/input:null,uniqueRate:input?count/input:null};})}));
