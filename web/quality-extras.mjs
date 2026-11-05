@@ -4,6 +4,17 @@ import {stageProcesses} from './stage-metrics.mjs';
 const $=id=>document.getElementById(id),pct=value=>Number.isFinite(value)?(value*100).toFixed(2)+'%':'—';
 let analysis,filters={},onOrder=()=>{},orderRows=[],orderPage=0,trend,globalProduct='',hidden=new Set(),colors=new Map(),selectedItems=null,availableItems=[];
 let trendDetailsTrigger=null;
+const dateUnitLabels={day:'日',week:'週',month:'月'};
+export const chartDateUnitLabel=unit=>dateUnitLabels[unit]||dateUnitLabels.day;
+export function syncChartDateUnits(select,rangeUnit,preferred=select.value){
+ const units=['month','week','day'];
+ const options=units.slice(units.includes(rangeUnit)?units.indexOf(rangeUnit):2);
+ select.replaceChildren(...options.map(unit=>{
+  const option=document.createElement('option');option.value=unit;option.textContent=chartDateUnitLabel(unit);return option;
+ }));
+ select.value=options.includes(preferred)?preferred:options[0];
+ select.disabled=options.length===1;
+}
 function selectOptions(id,empty,values,value){const select=$(id);select.replaceChildren();for(const [key,label] of [['',empty],...values]){const option=document.createElement('option');option.value=key;option.textContent=label;select.append(option);}select.value=value||'';}
 function save(bytes,name){const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);}
 async function downloading(button,fn){
@@ -24,7 +35,7 @@ function renderTrendChoices(){
  for(const name of availableItems.filter(name=>name.normalize('NFKC').toLowerCase().includes(query))){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.value=name;check.checked=selectedItems==null||selectedItems.has(name);check.onchange=()=>{if(selectedItems==null)selectedItems=new Set(availableItems);check.checked?selectedItems.add(name):selectedItems.delete(name);hidden.clear();updateTrendSummary();renderTrend();};label.append(check,document.createTextNode(name));host.append(label);}
  if(!host.children.length)host.textContent=availableItems.length?'沒有符合的項目':'目前沒有不良項目';updateTrendSummary();
 }
-function trendScope(){return {...filters,product:$('trendProduct').value,process:$('trendProcess').value||filters.process||'',date:'',defect:''};}
+function trendScope(){return {...filters,granularity:$('trendChartDateUnit').value||filters.granularity,product:$('trendProduct').value,process:$('trendProcess').value||filters.process||'',date:'',dateUnit:'',defect:''};}
 function closeTrendProductDetails(restoreFocus=false){
  $('trendProductDetails').hidden=true;
  $('trendProductDetailTable').replaceChildren();
@@ -187,9 +198,10 @@ function renderTrend(){
  };
  canvas.dataset.points=trend.dates.length;canvas.dataset.series=trend.series.length;canvas.dataset.visibleSeries=visible.length;$('trendDownload').disabled=!visible.length;canvas.setAttribute('aria-label','不良項目推移圖；各製程依該製程唯一投入PPID計算，單一不良項目會標示點位不良率；只顯示有投入PPID的日期或區間');$('trendSummary').textContent=trend.dates.length+' 個有投入的日期區間 · 製程：'+(trendScope().process||'全部製程')+' · 顯示 '+visible.length+'／'+trend.series.length+' 條線';
 }
-export function renderQualityExtras(data,scope,selectOrder){const changed=analysis!==data,productChanged=globalProduct!==scope.product;analysis=data;filters={...scope};onOrder=selectOrder;if(changed||productChanged){selectedItems=null;hidden.clear();$('trendItemSearch').value='';}if(changed){$('trendPointDetails').open=false;globalProduct='';hidden=new Set();colors=new Map([...new Set(data.attribution.map(row=>row.defect))].sort().map((name,i)=>[name,trendColors[i%trendColors.length]]));$('orderYieldSearch').value='';orderPage=0;}const product=changed||productChanged?scope.product||'':$('trendProduct').value;globalProduct=scope.product;selectOptions('trendProduct','全部產品',data.products.map(p=>[p.id,p.ic+'／'+p.model]),product);refreshTrendOptions();orderRows=orderYieldRows(data,scope);renderOrders();renderTrend();renderComparison();}
+export function renderQualityExtras(data,scope,selectOrder){const changed=analysis!==data,productChanged=globalProduct!==scope.product,unitChanged=filters.granularity!==scope.granularity;analysis=data;filters={...scope};syncChartDateUnits($('trendChartDateUnit'),scope.granularity,changed||unitChanged?scope.granularity:undefined);onOrder=selectOrder;if(changed||productChanged){selectedItems=null;hidden.clear();$('trendItemSearch').value='';}if(changed){$('trendPointDetails').open=false;globalProduct='';hidden=new Set();colors=new Map([...new Set(data.attribution.map(row=>row.defect))].sort().map((name,i)=>[name,trendColors[i%trendColors.length]]));$('orderYieldSearch').value='';orderPage=0;}const product=changed||productChanged?scope.product||'':$('trendProduct').value;globalProduct=scope.product;selectOptions('trendProduct','全部產品',data.products.map(p=>[p.id,p.ic+'／'+p.model]),product);refreshTrendOptions();orderRows=orderYieldRows(data,scope);renderOrders();renderTrend();renderComparison();}
 $('orderYieldSearch').oninput=()=>{orderPage=0;renderOrders();};$('orderYieldPrev').onclick=()=>{orderPage--;renderOrders();};$('orderYieldNext').onclick=()=>{orderPage++;renderOrders();};$('trendProduct').onchange=()=>{hidden.clear();selectedItems=null;$('trendItemSearch').value='';refreshTrendOptions();renderTrend();};$('trendProcess').onchange=()=>{hidden.clear();selectedItems=null;$('trendItemSearch').value='';refreshTrendOptions();renderTrend();};
-$('trendDownload').onclick=()=>downloading($('trendDownload'),async()=>{const canvas=$('defectTrendChart'),series=trend.series.filter(item=>!hidden.has(item.key||item.defect));if(!series.length)return;save(await createDefectTrendWorkbook(selectTrendSeries(trend,series.map(item=>item.key||item.defect)),{...sourceOptions(),showPointLabels:selectedItems?.size===1||series.length===1,snapshot:canvas.toDataURL('image/png'),imageWidth:canvas.width/(window.devicePixelRatio||1),imageHeight:260,sheets:[stageComparisonSheet(analysis,{...filters,product:$('trendProduct').value,date:'',defect:''})]}),'AutoReport_不良率項目推移圖.xlsx');});
+$('trendChartDateUnit').onchange=()=>{refreshTrendOptions();renderTrend();};
+$('trendDownload').onclick=()=>downloading($('trendDownload'),async()=>{const canvas=$('defectTrendChart'),series=trend.series.filter(item=>!hidden.has(item.key||item.defect));if(!series.length)return;const granularity=trendScope().granularity,options=sourceOptions();save(await createDefectTrendWorkbook(selectTrendSeries(trend,series.map(item=>item.key||item.defect)),{...options,notes:[...options.notes,['圖表日期單位',chartDateUnitLabel(granularity)]],showPointLabels:selectedItems?.size===1||series.length===1,snapshot:canvas.toDataURL('image/png'),imageWidth:canvas.width/(window.devicePixelRatio||1),imageHeight:260,sheets:[stageComparisonSheet(analysis,{...filters,granularity,product:$('trendProduct').value,date:'',defect:''})]}),'AutoReport_不良率項目推移圖.xlsx');});
 $('orderYieldDownload').onclick=()=>downloading($('orderYieldDownload'),async()=>{const rows=searchedOrders();save(await createStageChartWorkbook({key:'工單良率',title:'工單良率',sheetName:'工單良率圖表',referenceLabel:'全檔唯一PPID良率',target:analysis.yield??0,color:'#117b73'},rows.map(row=>({date:row.order+'／'+row.model,value:row.yield})),{...sourceOptions(true),notes:[...sourceOptions(true).notes,['工單良率','(工單投入唯一PPID－首次歸屬此工單的不良PPID)／工單投入唯一PPID。沿用全檔首次FAIL優先，其次GOOD有不良項目；不因選擇不良項目而改變工單良率。'],['明細範圍','工單表依產品、工單、日期區間、單一日期與製程篩選；文字搜尋：'+($('orderYieldSearch').value||'無')]],sheets:[{name:'工單良率明細',rows:[['工單','IC','機種','投入PPID','良品PPID','首次歸屬不良PPID','工單良率','工單不良率','開始日期','結束日期'],...rows.map(row=>[row.order,row.ic,row.model,row.total,row.good,row.fail,row.yield,row.badRate,row.start,row.end])],percentColumns:[6,7]}]}),'AutoReport_工單良率分析.xlsx');});
 
 $('trendItemSearch').oninput=renderTrendChoices;
