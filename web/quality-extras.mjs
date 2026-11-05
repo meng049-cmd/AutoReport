@@ -24,6 +24,55 @@ function closeTrendProductDetails(restoreFocus=false){
  if(restoreFocus)trendDetailsTrigger?.focus();
  trendDetailsTrigger=null;
 }
+function renderTrendProductChart(rows,color){
+ const maxRate=rows.reduce((max,row)=>Math.max(max,row.rate??0),0);
+ const step=Math.max(.0001,maxRate/4);
+ const magnitude=10**Math.floor(Math.log10(step));
+ const tickSize=[magnitude,2*magnitude,5*magnitude].find(size=>size>=step)??10*magnitude;
+ const limit=Math.min(1,tickSize*4);
+
+ const table=document.createElement('table');
+ table.className='trend-product-chart';
+ table.setAttribute('aria-label','機種／IC 不良率橫向長條圖');
+ if(color)table.style.setProperty('--trend-bar-color',color);
+ const head=table.createTHead().insertRow();
+ for(const label of ['機種','IC','投入 PPID','不良 PPID','不良率']){
+  const th=document.createElement('th');
+  th.scope='col';
+  th.textContent=label;
+  head.append(th);
+ }
+ const axisLayout=document.createElement('div'),axis=document.createElement('div');
+ axisLayout.className='trend-rate-layout';
+ axisLayout.setAttribute('aria-hidden','true');
+ axis.className='trend-rate-axis';
+ for(let i=0;i<=4;i++){
+  const tick=document.createElement('span');
+  tick.style.left=i*25+'%';
+  tick.textContent=pct(limit*i/4);
+  axis.append(tick);
+ }
+ axisLayout.append(axis);
+ head.lastElementChild.append(axisLayout);
+
+ const body=table.createTBody();
+ for(const row of rows){
+  const tr=body.insertRow();
+  for(const value of [row.model,row.ic,row.input.toLocaleString(),row.count.toLocaleString()])tr.insertCell().textContent=value;
+  const layout=document.createElement('div'),track=document.createElement('span'),bar=document.createElement('span'),value=document.createElement('span');
+  layout.className='trend-rate-layout';
+  track.className='trend-rate-track';
+  track.setAttribute('aria-hidden','true');
+  bar.className='trend-rate-bar';
+  bar.style.width=Math.min(100,(row.rate??0)/limit*100)+'%';
+  value.className='trend-rate-value';
+  value.textContent=pct(row.rate);
+  track.append(bar);
+  layout.append(track,value);
+  tr.insertCell().append(layout);
+ }
+ $('trendProductDetailTable').append(table);
+}
 function showTrendProductDetails(series,bucket,trigger){
  closeTrendProductDetails();
  const scope=trendScope(),rows=trendProductBreakdown(analysis,scope,series,bucket);
@@ -32,18 +81,7 @@ function showTrendProductDetails(series,bucket,trigger){
  $('trendProductDetailHeading').textContent=series.defect+' 的機種／IC 明細';
  const period=bucket?.label||(scope.days?.length?scope.days.join('、'):scope.startDate+' ～ '+scope.endDate);
  $('trendProductDetailScope').textContent=period+' · '+(rows.length?rows.length+' 組有此不良的機種／IC':'這個期間沒有此項不良');
- if(rows.length){
-  const table=document.createElement('table'),head=table.createTHead().insertRow();
-  for(const label of ['機種','IC','投入 PPID','不良 PPID','不良率']){
-   const th=document.createElement('th');th.scope='col';th.textContent=label;head.append(th);
-  }
-  const body=table.createTBody();
-  for(const row of rows){
-   const tr=body.insertRow();
-   for(const value of [row.model,row.ic,row.input.toLocaleString(),row.count.toLocaleString(),pct(row.rate)])tr.insertCell().textContent=value;
-  }
-  $('trendProductDetailTable').append(table);
- }
+ if(rows.length)renderTrendProductChart(rows,series.color);
  $('trendProductDetails').hidden=false;
  $('trendProductDetailHeading').focus();
 }
