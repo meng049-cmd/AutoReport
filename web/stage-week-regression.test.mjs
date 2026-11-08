@@ -58,7 +58,7 @@ test('year-boundary prior week and day multi-selection keep their own scopes',()
  assert.equal(model.daily.length,1);
 });
 
-test('both editable charts share source ranges, weekly point fills and formula results',async()=>{
+test('both editable charts share numeric source ranges and weekly point fills',async()=>{
  const rows=[
   {kind:'week',date:'2026-W41',value:.97,processRows:[{process:'功能一測試',value:.97}]},
   {kind:'week',date:'2026-W42',value:.98,processRows:[{process:'功能一測試',value:.98}]},
@@ -70,8 +70,9 @@ test('both editable charts share source ranges, weekly point fills and formula r
   await book.xlsx.load(bytes);
   const sheet=book.getWorksheet('每日階段良率');
   assert.deepEqual([2,3,4].map(index=>sheet.getCell('A'+index).value),rows.map(item=>item.date));
-  assert.equal(sheet.getCell('B2').value.result,.97);
-  assert.match(sheet.getCell('B2').value.formula,/AGGREGATE.*製程良率資料/);
+  assert.deepEqual([2,3,4].map(index=>sheet.getCell('B'+index).value),[.97,.98,1]);
+  assert.equal(book.getWorksheet('製程良率資料').getCell('A2').value,'2026-W41');
+  assert.doesNotMatch(await zip.file('xl/worksheets/sheet1.xml').async('string'),/<f[ >]/);
   assert.equal(book.getWorksheet('已產生圖表').getImages().length,0);
   const charts=await Promise.all([1,2].map(id=>zip.file('xl/charts/chart'+id+'.xml').async('string')));
   assert.equal(charts[0],charts[1]);
@@ -83,4 +84,41 @@ test('both editable charts share source ranges, weekly point fills and formula r
   }
   assert.ok(zip.file('xl/worksheets/_rels/sheet3.xml.rels'));
  }
+});
+
+test('linked stage export stores all weekly and daily yields as numbers before Excel recalculation',async()=>{
+ const labels=['2026-W41','2026-W42','2026-10-27','2026-10-28','2026-10-29','2026-10-30'];
+ const cases=[
+  {stage:'前段',process:'功能一測試',rates:[.9751,.9855,.9776,.9931,1,1]},
+  {stage:'後段',process:'功能二測試',rates:[1,.9997,1,.9995,1,1]}
+ ];
+ for(const item of cases){
+  const rows=labels.map((date,i)=>({
+   date,kind:i<2?'week':'day',value:item.rates[i],
+   processRows:[{process:item.process,value:item.rates[i]}]
+  }));
+  const bytes=await createStageChartWorkbook({key:item.stage,title:'B24-Elan · '+item.stage,target:.99,color:'#d54545'},rows,{linkedChartCopy:true,inputCounts:[26,1491,1035,1443,367,2]});
+  const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);
+  const sheet=book.getWorksheet('每日階段良率'),zip=await JSZip.loadAsync(bytes);
+  for(const [i,expected] of item.rates.entries()){
+   const cell=sheet.getCell(i+2,2);
+   assert.equal(cell.type,ExcelJS.ValueType.Number);
+   assert.equal(cell.value,expected);
+  }
+  for(const id of [1,2]){
+   const chart=await zip.file('xl/charts/chart'+id+'.xml').async('string');
+   const bar=chart.match(/<c:barChart>[\s\S]*?<\/c:barChart>/)[0];
+   const values=bar.match(/<c:numCache>[\s\S]*?<\/c:numCache>/)[0];
+   assert.deepEqual([...values.matchAll(/<c:pt idx="\d+"><c:v>([^<]+)<\/c:v><\/c:pt>/g)].map(match=>Number(match[1])),item.rates);
+  }
+ }
+});
+
+test('linked stage export preserves a true zero and a missing yield distinctly',async()=>{
+ const rows=[{date:'2026-10-27',value:0,processRows:[{process:'功能一測試',value:0}]},{date:'2026-10-28',value:null,processRows:[]}];
+ const bytes=await createStageChartWorkbook({key:'前段',title:'前段',target:.985,color:'#d54545'},rows,{linkedChartCopy:true});
+ const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);
+ const sheet=book.getWorksheet('每日階段良率');
+ assert.equal(sheet.getCell('B2').value,0);
+ assert.equal(sheet.getCell('B3').value,null);
 });
