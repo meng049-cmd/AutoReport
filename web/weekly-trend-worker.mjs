@@ -4,6 +4,8 @@ import '../quality-core.js';
 import '../indexed-detail-store.js';
 import {addTrendProcessUnit,trendDefectName} from './defect-analysis.mjs';
 
+import {summarizeStage} from './stage-metrics.mjs';
+
 const MAX_ROWS=300000;
 const index=globalThis.AutoReportDetailIndex;
 
@@ -37,7 +39,7 @@ function summarize(analysis){
  return {input:analysis.total,count:analysis.fail,products,processes};
 }
 
-self.onmessage=async({data:{period,sources,skipInvalidRows,mode}})=>{
+self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext}})=>{
  const label=mode==='day'?'當日':'本週';
  try{
   const merger=new globalThis.DetailMerger(null,{skipInvalidRows});
@@ -52,7 +54,18 @@ self.onmessage=async({data:{period,sources,skipInvalidRows,mode}})=>{
    });
    merger.completeIndexed();
   }
-  const summary=summarize(globalThis.analyzeQuality(merger));
-  self.postMessage({summary,skipped:merger.skippedRows.length});
+  const analysis=globalThis.analyzeQuality(merger);
+  if(stageContext){
+   const rowsByProduct=new Map();
+   for(const row of analysis.observations){
+    if(!rowsByProduct.has(row.product))rowsByProduct.set(row.product,[]);
+    rowsByProduct.get(row.product).push(row);
+   }
+   const products=analysis.products.map(product=>({
+    id:product.id,ic:product.ic,model:product.model,
+    stages:['前段','後段'].map(stage=>({stage,...summarizeStage(rowsByProduct.get(product.id)||[],stage)}))
+   }));
+   self.postMessage({stageContext:{products},skipped:merger.skippedRows.length});
+  }else self.postMessage({summary:summarize(analysis),skipped:merger.skippedRows.length});
  }catch(error){self.postMessage({error:error.message||'無法計算'+label+'推移。'});}
 };
