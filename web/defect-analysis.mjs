@@ -124,6 +124,30 @@ export function addTrendProcessUnit(units,row){
 }
 export const trendDefectName=row=>row.defect||'【未填不良項目】';
 
+export function totalDefectItemRows(analysis, filters={}) {
+ const processes = new Map();
+ for (const row of filteredObservations(analysis, filters)) {
+  if (row.attributionOnly || !isStageProcess(row.process, filters.stage)) continue;
+  if (!processes.has(row.process)) processes.set(row.process, new Map());
+  addTrendProcessUnit(processes.get(row.process), row);
+ }
+ const rows = [];
+ for (const [process, units] of processes) {
+  const counts = new Map();
+  if (filters.defect) counts.set(filters.defect, 0);
+  for (const row of units.values()) {
+   if (!row.fail) continue;
+   const defect = trendDefectName(row);
+   if (filters.defect && defect !== filters.defect) continue;
+   counts.set(defect, (counts.get(defect) || 0) + 1);
+  }
+  for (const [defect, count] of counts) {
+   rows.push({process, defect, input:units.size, count, rate:count/units.size});
+  }
+ }
+ return rows.sort((a,b) => b.rate-a.rate || b.count-a.count || a.process.localeCompare(b.process,'zh-Hant') || a.defect.localeCompare(b.defect,'zh-Hant'));
+}
+
 export function trendOrderBreakdown(analysis, filters, series, bucket) {
  const scope = {...filters, process:series.process, date:'', defect:''};
  if (bucket) {

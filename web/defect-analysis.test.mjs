@@ -1,5 +1,36 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,trendOrderBreakdown,trendRangeOrderBreakdown,poolTrendCounts} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,trendOrderBreakdown,trendRangeOrderBreakdown,totalDefectItemRows,poolTrendCounts} from './defect-analysis.mjs';
+
+test('total defect items deduplicate the selected period per process and keep all process inputs as the denominator',()=>{
+ const front='DAF外觀',test='功能一測試';
+ const row=(serial,process,date,defect='',extra={})=>({
+  serial,process,date,defect,product:'A',order:'WO-1',fail:!!defect,status:defect?'FAIL':'GOOD',...extra
+ });
+ const analysis={observations:[
+  row('shared',front,'2026-10-25'),
+  row('shared',front,'2026-10-26','CG偏移'),
+  row('shared',front,'2026-10-27','CG偏移'),
+  row('good',front,'2026-10-27'),
+  row('other-defect',front,'2026-10-27','異物'),
+  row('shared',test,'2026-10-26','CG偏移'),
+  row('outside-date',test,'2026-11-01','CG偏移'),
+  row('outside-product',test,'2026-10-27','CG偏移',{product:'B'}),
+  row('outside-order',test,'2026-10-27','CG偏移',{order:'WO-2'}),
+  row('outside-process','非指定製程','2026-10-27','CG偏移'),
+  row('synthetic',test,'2026-10-27','CG偏移',{attributionOnly:true})
+ ]};
+ const scope={startDate:'2026-10-25',endDate:'2026-10-31',product:'A',order:'WO-1'};
+ const rows=totalDefectItemRows(analysis,scope);
+ assert.deepEqual(rows.map(({process,defect,input,count})=>[process,defect,input,count]),[
+  [test,'CG偏移',1,1],[front,'異物',3,1],[front,'CG偏移',3,1]
+ ].sort((a,b)=>b[3]/b[2]-a[3]/a[2]||a[1].localeCompare(b[1],'zh-Hant')));
+ assert.equal(rows.find(row=>row.process===front&&row.defect==='CG偏移').rate,1/3);
+ const selected=totalDefectItemRows(analysis,{...scope,process:front,defect:'CG偏移'});
+ assert.deepEqual(selected,[{process:front,defect:'CG偏移',input:3,count:1,rate:1/3}]);
+ assert.deepEqual(totalDefectItemRows(analysis,{...scope,process:test,defect:'異物'}),[
+  {process:test,defect:'異物',input:1,count:0,rate:0}
+ ]);
+});
 
 test('point work orders reconcile with the plotted PPIDs and respect the selected bucket and products',()=>{
  const process='DAF外觀',date='2026-10-27';

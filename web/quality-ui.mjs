@@ -6,7 +6,7 @@ import {createStageChartWorkbook} from './chart-export.mjs';
 import {buildStageAnalysis,stageAuditSheets} from './stage-analysis.mjs';
 import {renderStageDrillContent} from './stage-drill-ui.mjs';
 import {contributionFormulaDetails} from './chart-formulas.mjs';
-import {usesGroupInputRate,defectChartValue,scopedQualitySummary,defectOptions,defectFilterLabel,dateFilterUnit,stageComparisonSheet,calendarDates,calendarBuckets,scopedBuckets,periodKey,periodBounds,periodLabel,dimensions,dimensionNames,defectDimensions,cohortInput,attributedRows,defectBreakdown,allDefectLevels,workOrderRows,orderYieldRows,orderName,filteredObservations} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,defectOptions,defectFilterLabel,dateFilterUnit,stageComparisonSheet,calendarDates,calendarBuckets,scopedBuckets,periodKey,periodBounds,periodLabel,dimensions,dimensionNames,defectDimensions,cohortInput,attributedRows,defectBreakdown,allDefectLevels,workOrderRows,orderYieldRows,orderName,filteredObservations,totalDefectItemRows} from './defect-analysis.mjs';
 const $=id=>document.getElementById(id),pct=x=>Number.isFinite(x)?(x*100).toFixed(2)+'%':'—';
 let analysis,stageChecks=[],periodStart='',periodEnd='',filters={},detailRows=[],detailPage=0,detailMode='ppid',firstAxis='date',stageModels=new Map(),stageDrillPaths=new Map(),stageDrillLeaves=new Map();
 let defaultPeriodStart='',defaultPeriodEnd='',dateChartUnit='';
@@ -148,8 +148,96 @@ function addLevel(scope){
  download.disabled=!view.groups.length;const pager=document.createElement('div');pager.className='row chart-pager';const prev=button('←',()=>{chartPages.set(chart.pageKey,(chartPages.get(chart.pageKey)||0)-1);drawDefectChart(chart);},'上一頁'+dimensionNames[key]+'圖表'),pageOutput=document.createElement('output'),next=button('→',()=>{chartPages.set(chart.pageKey,(chartPages.get(chart.pageKey)||0)+1);drawDefectChart(chart);},'下一頁'+dimensionNames[key]+'圖表');pager.append(prev,pageOutput,next);
  const scroll=document.createElement('div');scroll.className='stage-chart-scroll';const canvas=document.createElement('canvas');canvas.id='defectChart'+suffix;canvas.setAttribute('aria-label',breakdownTitle(key)+'圖表');scroll.append(canvas);const groupHost=document.createElement('div');groupHost.id='defectGroups'+suffix;groupHost.className='defect-groups';article.append(head,contributionFormulaDetails(analysis,view,scope),pager,scroll,groupHost);$('defectLevels').append(article);const chart={view,scope:{...scope},canvas,prev,next,pageOutput,groupHost,title:title.textContent,pageKey:JSON.stringify([firstAxis,baseFilters(),scope.granularity,scope.date?dateFilterUnit(scope):'',...dimensions.map(key=>scope[key]||'')])};charts.push(chart);drawDefectChart(chart);
 }
+function renderTotalDefectItems() {
+ const rows = totalDefectItemRows(analysis, filters);
+ const canvas = $('totalDefectItemsChart');
+ const scroll = canvas.parentElement;
+ const table = $('totalDefectItemsTable');
+ const status = $('totalDefectItemsStatus');
+ const pager = $('totalDefectItemsPager');
+ const previous = $('totalDefectItemsPrev');
+ const next = $('totalDefectItemsNext');
+ const pageSize = 12;
+ const pages = Math.max(1,Math.ceil(rows.length/pageSize));
+ const maxRate = Math.max(.0001,rows[0]?.rate || 0);
+ const axisMax = Math.min(1,maxRate*1.18);
+ let page = Math.min(chartPages.get('totalDefectItems') || 0,pages-1);
+ status.textContent = rows.length ? rows.length.toLocaleString()+' 組製程／不良項目' : '目前篩選範圍沒有不良項目可顯示。';
+ scroll.hidden = table.hidden = !rows.length;
+ pager.hidden = pages === 1;
+ table.replaceChildren();
+ canvas.title = '';
+ canvas.onmousemove = null;
+ if (!rows.length) return;
+
+ function drawPage() {
+  chartPages.set('totalDefectItems',page);
+  previous.disabled = page === 0;
+  next.disabled = page === pages-1;
+  $('totalDefectItemsPage').textContent = (page+1)+' / '+pages;
+  const displayed = rows.slice(page*pageSize,(page+1)*pageSize);
+  const height = 262, left = 65, right = 16, top = 28, bottom = 205;
+  const width = Math.max(scroll.clientWidth || 500,displayed.length*150+left+right);
+  const slot = (width-left-right)/displayed.length;
+  const ctx = prepareCanvas(canvas,width,height);
+  ctx.font = '11px system-ui';
+  for (let i=0;i<=4;i++) {
+   const y = bottom-(bottom-top)*i/4;
+   ctx.strokeStyle = '#e6ebf0';
+   ctx.beginPath();
+   ctx.moveTo(left,y);
+   ctx.lineTo(width-right,y);
+   ctx.stroke();
+   ctx.fillStyle = '#566e80';
+   ctx.textAlign = 'right';
+   ctx.fillText(pct(axisMax*i/4),left-8,y+4);
+  }
+  ctx.textAlign = 'center';
+  for (const [index,row] of displayed.entries()) {
+   const x = left+slot*(index+.5);
+   const y = bottom-(bottom-top)*row.rate/axisMax;
+   const barWidth = Math.min(42,slot*.55);
+   ctx.fillStyle = '#117b73';
+   ctx.fillRect(x-barWidth/2,y,barWidth,bottom-y);
+   ctx.fillStyle = '#17324a';
+   ctx.font = '600 11px system-ui';
+   ctx.fillText(row.count.toLocaleString()+' 不良 · '+pct(row.rate),x,y-8,slot-8);
+   ctx.fillText(row.defect.length>18 ? row.defect.slice(0,17)+'…' : row.defect,x,bottom+15,slot-8);
+   ctx.font = '11px system-ui';
+   ctx.fillStyle = '#566e80';
+   ctx.fillText(row.process,x,bottom+31,slot-8);
+   ctx.fillText('製程總投入 '+row.input.toLocaleString(),x,bottom+47,slot-8);
+  }
+  canvas.title = '';
+  canvas.onmousemove = event => {
+   const index = Math.floor((event.clientX-canvas.getBoundingClientRect().left-left)/slot);
+   const row = displayed[index];
+   canvas.title = row ? row.process+' · '+row.defect+' · 製程總投入 '+row.input.toLocaleString()+' PPID · 不良 '+row.count.toLocaleString()+' PPID · '+pct(row.rate) : '';
+  };
+
+  const data = document.createElement('table');
+  const head = data.createTHead().insertRow();
+  for (const label of ['製程','不良項目','製程總投入 PPID','不良 PPID','不良率']) {
+   const th = document.createElement('th');
+   th.scope = 'col';
+   th.textContent = label;
+   head.append(th);
+  }
+  const body = data.createTBody();
+  for (const row of displayed) {
+   const tr = body.insertRow();
+   for (const value of [row.process,row.defect,row.input.toLocaleString(),row.count.toLocaleString(),pct(row.rate)]) tr.insertCell().textContent = value;
+  }
+  table.replaceChildren(data);
+ }
+ previous.onclick = () => { if (page>0) { page--; drawPage(); } };
+ next.onclick = () => { if (page<pages-1) { page++; drawPage(); } };
+ drawPage();
+}
+
 function renderDefects(){
  renderControls();const view=defectBreakdown(analysis,filters,dateRange(),axisOrder());metrics('defectTotals',[['區間投入 PPID',view.input.toLocaleString()],['首次歸屬不良 PPID',view.count.toLocaleString()],['歸屬不良率',pct(view.input?view.count/view.input:null)],['全檔不良率貢獻',pct(view.contribution)]]);
+ renderTotalDefectItems();
  $('defectLevels').replaceChildren();charts.length=0;const scope={...filters};if(axisOrder().every(key=>scope[key]))scope[axisOrder().at(-1)]='';addLevel(scope);const footer=document.createElement('nav');footer.className='breadcrumbs chart-back-nav';footer.setAttribute('aria-label','圖表下方返回標籤');renderBreadcrumb(footer);const up=button('↑ 返回上一層',back);up.disabled=!dimensions.some(key=>filters[key])&&!filters.order;up.classList.add('defect-return');footer.append(up);$('defectLevels').append(footer);
  if(axisOrder().every(key=>filters[key])){const leaf=document.createElement('div');leaf.className='defect-leaf';const label=document.createElement('strong');label.textContent=defectFilterLabel(filters.defect)+' · '+view.count+' PPID';leaf.append(label,document.createTextNode('　'),button('查看 PPID 明細',()=>openDetails('ppid')),button('查看工單',()=>openDetails('order')));$('defectLevels').append(leaf);}
  $('defectOpen').disabled=!view.count;$('defectOrders').disabled=!view.count;$('defectEmpty').hidden=Boolean(view.input||view.count);
