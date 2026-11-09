@@ -1,10 +1,19 @@
-export function mountTrendOrderDetail(host, period, lines, load) {
+export function mountTrendOrderDetail(host, periods, lines, load) {
  host.replaceChildren();
- if (!lines.length) return () => {};
+ if (!lines.length) return null;
 
  const details = document.createElement('details');
  const summary = document.createElement('summary');
- summary.textContent = '工單明細 · ' + period;
+ summary.textContent = '工單明細';
+ const periodLabel = document.createElement('label');
+ const periodSelect = document.createElement('select');
+ periodLabel.append('日期區間 ',periodSelect);
+ for (const [index,text] of [['','整段日期（各點合計）'],...periods.map((period,index)=>[String(index),period.label])]) {
+  const option = document.createElement('option');
+  option.value = index;
+  option.textContent = text;
+  periodSelect.append(option);
+ }
  const label = document.createElement('label');
  const select = document.createElement('select');
  label.append('製程／不良項目 ',select);
@@ -16,13 +25,16 @@ export function mountTrendOrderDetail(host, period, lines, load) {
  }
  const note = document.createElement('p');
  note.className = 'muted';
- note.textContent = '每片 PPID 依曲線採用的過站紀錄歸屬到一張工單。工單不良率為該項不良 PPID ÷ 該工單投入 PPID。';
+ note.textContent = '整段日期依工單加總各點的投入與不良，再計算不良率。同一 PPID 跨日期點可能重複計入。';
  const status = document.createElement('p');
  status.setAttribute('role','status');
  const content = document.createElement('div');
  content.className = 'scroll';
  details.className = 'formula-notes';
- details.append(summary,label,note,status,content);
+ const controls = document.createElement('div');
+ controls.className = 'row';
+ controls.append(periodLabel,label);
+ details.append(summary,controls,note,status,content);
  host.append(details);
 
  let request;
@@ -68,7 +80,10 @@ export function mountTrendOrderDetail(host, period, lines, load) {
   content.replaceChildren();
   status.textContent = '正在讀取工單明細…';
   try {
-   const rows = await load(lines[Number(select.value)], current.signal);
+   const index = periodSelect.value === '' ? null : Number(periodSelect.value);
+   const rows = await load(lines[Number(select.value)], index, current.signal, message => {
+    if (!current.signal.aborted) status.textContent = message;
+   });
    if (current.signal.aborted) return;
    status.textContent = rows.length ? '共 '+rows.length+' 張工單' : '本區間沒有符合條件的工單。';
    if (rows.length) renderPage(rows,0);
@@ -78,10 +93,24 @@ export function mountTrendOrderDetail(host, period, lines, load) {
  }
  details.ontoggle = refresh;
  select.onchange = refresh;
- return () => {
-  details.ontoggle = null;
-  select.onchange = null;
-  request?.abort();
-  host.replaceChildren();
+ periodSelect.onchange = refresh;
+ return {
+  close() {
+   details.open = false;
+   request?.abort();
+  },
+  selectPoint(index, open=false) {
+   const changed = periodSelect.value !== String(index);
+   periodSelect.value = String(index);
+   if (open && !details.open) details.open = true;
+   else if (changed && details.open) refresh();
+  },
+  dispose() {
+   details.ontoggle = null;
+   select.onchange = null;
+   periodSelect.onchange = null;
+   request?.abort();
+   host.replaceChildren();
+  }
  };
 }

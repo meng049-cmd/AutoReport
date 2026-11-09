@@ -135,6 +135,23 @@ export function trendOrderBreakdown(analysis, filters, series, bucket) {
   if (!row.attributionOnly) addTrendProcessUnit(units, row);
  }
  const orders = new Map();
+ countTrendOrders(orders,units,series);
+ return finishTrendOrders(orders);
+}
+
+export function trendRangeOrderBreakdown(analysis,filters,series,buckets) {
+ const periods = new Map(buckets.map(bucket => [bucket.key,new Map()]));
+ for (const row of filteredObservations(analysis,{...filters,process:series.process,date:'',defect:''})) {
+  if (row.attributionOnly) continue;
+  const units = periods.get(periodKey(row.date,filters.granularity));
+  if (units) addTrendProcessUnit(units,row);
+ }
+ const orders = new Map();
+ for (const units of periods.values()) countTrendOrders(orders,units,series);
+ return finishTrendOrders(orders);
+}
+
+function countTrendOrders(orders,units,series) {
  for (const row of units.values()) {
   const order = orderName(row.order);
   if (!orders.has(order)) orders.set(order, {order,input:0,count:0});
@@ -142,6 +159,9 @@ export function trendOrderBreakdown(analysis, filters, series, bucket) {
   group.input++;
   if (row.fail && trendDefectName(row) === series.defectName) group.count++;
  }
+}
+
+export function finishTrendOrders(orders) {
  return [...orders.values()]
   .map(group => ({...group,rate:group.count/group.input}))
   .sort((a,b) => b.count-a.count || a.order.localeCompare(b.order,'zh-Hant',{numeric:true}));

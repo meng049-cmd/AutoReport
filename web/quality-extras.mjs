@@ -1,11 +1,12 @@
-import {stageComparisonRows,stageComparisonSheet,defectTrend,orderYieldRows,selectTrendSeries,trendProductBreakdown,trendOrderBreakdown} from './defect-analysis.mjs';
+import {stageComparisonRows,stageComparisonSheet,defectTrend,orderYieldRows,selectTrendSeries,trendProductBreakdown,trendOrderBreakdown,trendRangeOrderBreakdown} from './defect-analysis.mjs';
 import {createDefectTrendWorkbook,createStageChartWorkbook,trendColors} from './chart-export.mjs';
 import {stageProcesses} from './stage-metrics.mjs';
 import {createTrendPicker} from './trend-picker.mjs';
 import {mountTrendOrderDetail} from './trend-order-detail.mjs';
+import {renderTrendPointTable} from './trend-point-details.mjs';
 const $=id=>document.getElementById(id),pct=value=>Number.isFinite(value)?(value*100).toFixed(2)+'%':'—';
 let analysis,filters={},onOrder=()=>{},orderRows=[],orderPage=0,trend,trendSource,globalProduct='',hidden=new Set(),colors=new Map(),selectedItems=null,availableItems=[];
-let trendDetailsTrigger=null, disposeOrderDetail;
+let trendDetailsTrigger=null, orderDetail;
 const dateUnitLabels={day:'日',week:'週',month:'月'};
 export const chartDateUnitLabel=unit=>dateUnitLabels[unit]||dateUnitLabels.day;
 export function syncChartDateUnits(select,rangeUnit,preferred=select.value){
@@ -139,11 +140,10 @@ function refreshTrendOptions() {
 }
 function renderTrend(){
  if(!analysis)return;
- disposeOrderDetail?.();
- disposeOrderDetail = null;
+ orderDetail?.dispose();
+ orderDetail = null;
  closeTrendProductDetails();
- $('trendPointContext').textContent='';
- $('trendSelection').textContent='將游標移到圖上，或使用左右方向鍵查看點位。';
+ $('trendSelection').replaceChildren();
  const selectedKeys=trendSource.series.filter(series=>selectedItems==null||selectedItems.has(series.item||series.defectName||series.defect)).map(series=>series.key||series.defect);
  trend=selectTrendSeries(trendSource,selectedKeys);
  for(const series of trend.series){const key=series.key||series.defect;if(!colors.has(key))colors.set(key,trendColors[colors.size%trendColors.length]);series.color=colors.get(key);}
@@ -189,28 +189,32 @@ function renderTrend(){
    const point=series.points[index];
    return series.defect+' '+pct(point?.rate)+'（不良唯一PPID '+(point?.count||0)+'／製程唯一投入PPID '+(point?.input||0)+'）';
   });
-  $('trendPointContext').textContent=' · '+context;
-  $('trendSelection').textContent=values.length?context+' · '+values.join(' · '):context+' · 目前沒有顯示的項目';
-  canvas.title=context;
+  canvas.title = [context,...values].join(' · ');
  };
  const pointDetails = $('trendPointDetails');
- let orderIndex = -1;
+ const detailTrend = {...trend,series:visible};
+ const scope = trendScope();
+ $('trendPointContext').textContent = ' · '+trend.dates.length+' 個日期區間';
+ orderDetail = mountTrendOrderDetail($('trendOrderDetail'),trend.dates,visible.filter(series => series.process),
+  (series,index) => index === null
+   ? trendRangeOrderBreakdown(analysis,scope,series,trend.dates)
+   : trendOrderBreakdown(analysis,scope,series,trend.dates[index]));
+ function showTable(index=0) {
+  renderTrendPointTable($('trendSelection'),detailTrend,{
+   startIndex:index,onPoint:point => orderDetail?.selectPoint(point,true)
+  });
+ }
  function showPoint(index) {
-  const bucket = trend.dates[index];
-  if (!bucket) return;
+  if (!trend.dates[index]) return;
   inspect(index);
-  if (orderIndex === index) return;
-  orderIndex = index;
-  const lines = visible.filter(series => series.process && series.points[index].input);
-  const scope = trendScope();
-  disposeOrderDetail?.();
-  disposeOrderDetail = mountTrendOrderDetail($('trendOrderDetail'),bucket.label,lines,
-   series => trendOrderBreakdown(analysis,scope,series,bucket));
+  showTable(index);
+  orderDetail?.selectPoint(index);
  }
  pointDetails.ontoggle = () => {
-  if (pointDetails.open) showPoint(Math.max(0,inspectedIndex));
+  if (pointDetails.open && !$('trendSelection').hasChildNodes()) showTable();
+  if (!pointDetails.open) orderDetail?.close();
  };
- if (pointDetails.open) showPoint(0);
+ if (pointDetails.open) showTable();
  const pointerIndex=event=>Math.floor((event.clientX-canvas.getBoundingClientRect().left-left)/slot);
  canvas.onmousemove=event=>{if (!pointDetails.open) inspect(pointerIndex(event));};
  canvas.onclick=event=>{

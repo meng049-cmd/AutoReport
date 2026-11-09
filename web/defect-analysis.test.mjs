@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,trendOrderBreakdown,poolTrendCounts} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,trendOrderBreakdown,trendRangeOrderBreakdown,poolTrendCounts} from './defect-analysis.mjs';
 
 test('point work orders reconcile with the plotted PPIDs and respect the selected bucket and products',()=>{
  const process='DAF外觀',date='2026-10-27';
@@ -14,7 +14,7 @@ test('point work orders reconcile with the plotted PPIDs and respect the selecte
   row('other-defect','WO-2',{...fail,defect:'crack'}),
   row('outside-product','WO-4',{...fail,product:'C'}),
   row('outside-process','WO-4',{...fail,process:'功能一測試'}),
-  row('other-week','WO-4',{...fail,date:'2026-11-02'}),
+  row('retested','WO-2',{...fail,date:'2026-11-02'}),
   row('before-selection','WO-4',{...fail,date:'2026-10-25'}),
   row('synthetic','WO-4',{...fail,attributionOnly:true})
  ]};
@@ -29,6 +29,10 @@ test('point work orders reconcile with the plotted PPIDs and respect the selecte
  assert.equal(rows.reduce((sum,row)=>sum+row.count,0),line.points[0].count);
  const indexedAnalysis={observations:analysis.observations.filter(row=>row.date===date)};
  assert.deepEqual(trendOrderBreakdown(indexedAnalysis,{productIds:scope.productIds},line),rows);
+ const rangeRows=trendRangeOrderBreakdown(analysis,scope,line,trend.dates);
+ assert.deepEqual(rangeRows.find(row=>row.order==='WO-2'),{order:'WO-2',input:3,count:2,rate:2/3});
+ assert.equal(rangeRows.reduce((sum,row)=>sum+row.input,0),line.points.reduce((sum,point)=>sum+point.input,0));
+ assert.equal(rangeRows.reduce((sum,row)=>sum+row.count,0),line.points.reduce((sum,point)=>sum+point.count,0));
 });
 
 test('trend multi-selection keeps unique PPID denominators per process and limits machine details to selected products',()=>{
