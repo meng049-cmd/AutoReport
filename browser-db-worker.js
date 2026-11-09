@@ -24,6 +24,23 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
   py.FS.unlink(path);self.postMessage({id,result:{reference}});return;
  }
  if(type==='download'){const bytes=state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3');self.postMessage({id,result:bytes.buffer},[bytes.buffer]);return;}
+ if(type==='confirmCorrections'){
+  if(!Array.isArray(file)||!file.length)throw Error('請先套用補填結果。');
+  self.postMessage({id,progress:'正在儲存已確認的工單補填對照…'});
+  const current=state?.reference||JSON.parse(new TextDecoder().decode(await get('reference.json')));
+  const corrections=[...(current.manual_corrections||[])];
+  for(const item of file){
+   if(!item.order||!item.ic||!item.model)throw Error('補填資料缺少工單、IC 或機種，請重新套用結果。');
+   let terms;try{terms=JSON.parse(item.key);}catch{throw Error('補填對照的查找條件無效，請重新套用結果。');}
+   const order=terms.find(([kind])=>kind==='order')?.[1]||item.order,part=terms.find(([kind])=>kind==='part')?.[1]||'';
+   const index=corrections.findIndex(row=>row.order===order&&(row.part||'')===part);
+   const saved={order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
+   if(index>=0)corrections[index]=saved;else corrections.push(saved);
+  }
+  const reference={...current,manual_corrections:corrections};
+  await saveBrowserDatabase({version:1,database:state?.database||null,reference});
+  self.postMessage({id,result:{reference,count:file.length}});return;
+ }
  if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>100*1024*1024)throw Error('請選擇一份 100 MB 以內的 .xlsx 原始對照檔。');
  self.postMessage({id,progress:'首次更新正在載入本地運算工具，請稍候…'});const py=await initialize();
  py.FS.writeFile('/app/data/active.sqlite3',state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3'));
@@ -32,7 +49,7 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
  const summary=JSON.parse(await py.runPythonAsync(`import json\nresult=update_database.append_excel('/app/data/active.sqlite3','/app/'+upload_filename)\njson.dumps(result,ensure_ascii=False)`));
  py.FS.unlink('/app/'+filename);
  if(summary.unchanged){self.postMessage({id,result:{summary,reference:state?.reference||null}});return;}
- const reference=JSON.parse(await py.runPythonAsync(`with autoreport.connect('/app/data/active.sqlite3') as db:\n    records=[]\n    for row in db.execute(autoreport.RECORD_SQL+' ORDER BY r.id'):\n        r=autoreport.present(row)\n        r['search_text']=row['search_text']\n        records.append(r)\n    data={'stats':autoreport.stats(db),'records':records,'keys':[list(r) for r in db.execute('SELECT kind,value,record_id FROM lookup_keys ORDER BY kind,value,record_id')]}\njson.dumps(data,ensure_ascii=False)`));
+ const reference=JSON.parse(await py.runPythonAsync(`with autoreport.connect('/app/data/active.sqlite3') as db:\n    records=[]\n    for row in db.execute(autoreport.RECORD_SQL+' ORDER BY r.id'):\n        r=autoreport.present(row)\n        r['search_text']=row['search_text']\n        records.append(r)\n    data={'manual_corrections':update_database.confirmed_corrections(db),'stats':autoreport.stats(db),'records':records,'keys':[list(r) for r in db.execute('SELECT kind,value,record_id FROM lookup_keys ORDER BY kind,value,record_id')]}\njson.dumps(data,ensure_ascii=False)`));
  const uploaded=[...(state?.reference?.uploaded_files||[]),{name:filename,size:file.size,imported_at:summary.updated_at}];
  reference.uploaded_files=uploaded;reference.source_files=[...new Set(reference.records.map(r=>r.source_file))].sort();reference.database_update=summary;
  const database=py.FS.readFile('/app/data/active.sqlite3').slice().buffer;await saveBrowserDatabase({version:1,database,reference});

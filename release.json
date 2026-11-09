@@ -1,7 +1,9 @@
 {
-  "buildId": "e31297d81830",
-  "sourceCommit": "eef42aa74c08c77e3309a37e30ea7b254af8be41",
+  "projectName": "AUTOREPORT 工單查找與品質分析",
+  "buildId": "683db78c090f",
+  "sourceCommit": null,
   "requireLoginForAnalysis": true,
+  "anonymousCloudMode": false,
   "supabaseHost": "dtrusgylbpulpycjwhrt.supabase.co",
-  "builtAt": "2026-10-24T16:37:24.165Z"
+  "builtAt": "2026-11-09T08:15:22.614Z"
 }
