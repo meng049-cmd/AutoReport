@@ -1,5 +1,35 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,poolTrendCounts} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,trendOrderBreakdown,poolTrendCounts} from './defect-analysis.mjs';
+
+test('point work orders reconcile with the plotted PPIDs and respect the selected bucket and products',()=>{
+ const process='DAF外觀',date='2026-10-27';
+ const row=(serial,order,extra={})=>({serial,order,process,date,product:'A',fail:false,status:'GOOD',...extra});
+ const fail={fail:true,status:'FAIL',defect:'dust'};
+ const analysis={observations:[
+  row('retested','WO-1'),
+  row('retested','WO-2',fail),
+  row('retested','WO-3',fail),
+  row('good','WO-1'),
+  row('no-order',' ',{...fail,product:'B'}),
+  row('other-defect','WO-2',{...fail,defect:'crack'}),
+  row('outside-product','WO-4',{...fail,product:'C'}),
+  row('outside-process','WO-4',{...fail,process:'功能一測試'}),
+  row('other-week','WO-4',{...fail,date:'2026-11-02'}),
+  row('before-selection','WO-4',{...fail,date:'2026-10-25'}),
+  row('synthetic','WO-4',{...fail,attributionOnly:true})
+ ]};
+ const scope={startDate:date,endDate:'2026-11-02',stage:'前段',granularity:'week',productIds:new Set(['A','B'])};
+ const trend=defectTrend(analysis,scope);
+ const line=trend.series.find(item=>item.process===process&&item.defectName==='dust');
+ const rows=trendOrderBreakdown(analysis,scope,line,trend.dates[0]);
+ assert.deepEqual(rows.map(({order,input,count,rate})=>[order,input,count,rate]).sort(),[
+  ['WO-1',1,0,0],['WO-2',2,1,.5],['【未填工單】',1,1,1]
+ ].sort());
+ assert.equal(rows.reduce((sum,row)=>sum+row.input,0),line.points[0].input);
+ assert.equal(rows.reduce((sum,row)=>sum+row.count,0),line.points[0].count);
+ const indexedAnalysis={observations:analysis.observations.filter(row=>row.date===date)};
+ assert.deepEqual(trendOrderBreakdown(indexedAnalysis,{productIds:scope.productIds},line),rows);
+});
 
 test('trend multi-selection keeps unique PPID denominators per process and limits machine details to selected products',()=>{
  const date='2026-10-25',p1='DAF外觀',p2='功能一測試',p3='功能二測試';

@@ -1,10 +1,11 @@
-import {stageComparisonRows,stageComparisonSheet,defectTrend,orderYieldRows,selectTrendSeries,trendProductBreakdown} from './defect-analysis.mjs';
+import {stageComparisonRows,stageComparisonSheet,defectTrend,orderYieldRows,selectTrendSeries,trendProductBreakdown,trendOrderBreakdown} from './defect-analysis.mjs';
 import {createDefectTrendWorkbook,createStageChartWorkbook,trendColors} from './chart-export.mjs';
 import {stageProcesses} from './stage-metrics.mjs';
 import {createTrendPicker} from './trend-picker.mjs';
+import {mountTrendOrderDetail} from './trend-order-detail.mjs';
 const $=id=>document.getElementById(id),pct=value=>Number.isFinite(value)?(value*100).toFixed(2)+'%':'—';
 let analysis,filters={},onOrder=()=>{},orderRows=[],orderPage=0,trend,trendSource,globalProduct='',hidden=new Set(),colors=new Map(),selectedItems=null,availableItems=[];
-let trendDetailsTrigger=null;
+let trendDetailsTrigger=null, disposeOrderDetail;
 const dateUnitLabels={day:'日',week:'週',month:'月'};
 export const chartDateUnitLabel=unit=>dateUnitLabels[unit]||dateUnitLabels.day;
 export function syncChartDateUnits(select,rangeUnit,preferred=select.value){
@@ -138,6 +139,8 @@ function refreshTrendOptions() {
 }
 function renderTrend(){
  if(!analysis)return;
+ disposeOrderDetail?.();
+ disposeOrderDetail = null;
  closeTrendProductDetails();
  $('trendPointContext').textContent='';
  $('trendSelection').textContent='將游標移到圖上，或使用左右方向鍵查看點位。';
@@ -190,12 +193,32 @@ function renderTrend(){
   $('trendSelection').textContent=values.length?context+' · '+values.join(' · '):context+' · 目前沒有顯示的項目';
   canvas.title=context;
  };
+ const pointDetails = $('trendPointDetails');
+ let orderIndex = -1;
+ function showPoint(index) {
+  const bucket = trend.dates[index];
+  if (!bucket) return;
+  inspect(index);
+  if (orderIndex === index) return;
+  orderIndex = index;
+  const lines = visible.filter(series => series.process && series.points[index].input);
+  const scope = trendScope();
+  disposeOrderDetail?.();
+  disposeOrderDetail = mountTrendOrderDetail($('trendOrderDetail'),bucket.label,lines,
+   series => trendOrderBreakdown(analysis,scope,series,bucket));
+ }
+ pointDetails.ontoggle = () => {
+  if (pointDetails.open) showPoint(Math.max(0,inspectedIndex));
+ };
+ if (pointDetails.open) showPoint(0);
  const pointerIndex=event=>Math.floor((event.clientX-canvas.getBoundingClientRect().left-left)/slot);
- canvas.onmousemove=event=>inspect(pointerIndex(event));
+ canvas.onmousemove=event=>{if (!pointDetails.open) inspect(pointerIndex(event));};
  canvas.onclick=event=>{
   const index=pointerIndex(event),bucket=trend.dates[index];
   if(!bucket)return;
-  inspect(index);
+  canvas.dataset.activeIndex = String(index);
+  pointDetails.open = true;
+  showPoint(index);
   const rect=canvas.getBoundingClientRect();
   let selected=null,nearest=10;
   for(const series of visible){
@@ -212,14 +235,17 @@ function renderTrend(){
  canvas.dataset.activeIndex='0';
  canvas.onkeydown=event=>{
   const active=Number(canvas.dataset.activeIndex)||0;
-  if(event.key==='Enter'&&visible.length===1&&trend.dates[active]){
+  if(event.key==='Enter'&&trend.dates[active]){
    event.preventDefault();
-   showTrendProductDetails(visible[0],trend.dates[active],canvas);
+   pointDetails.open = true;
+   showPoint(active);
+   if (visible.length===1) showTrendProductDetails(visible[0],trend.dates[active],canvas);
   }else if(['ArrowLeft','ArrowRight'].includes(event.key)){
    event.preventDefault();
    const index=Math.max(0,Math.min(trend.dates.length-1,active+(event.key==='ArrowRight'?1:-1)));
    canvas.dataset.activeIndex=String(index);
-   inspect(index);
+   if (pointDetails.open) showPoint(index);
+   else inspect(index);
   }
  };
  canvas.dataset.points=trend.dates.length;canvas.dataset.series=trend.series.length;canvas.dataset.visibleSeries=visible.length;$('trendDownload').disabled=!visible.length;canvas.setAttribute('aria-label','不良項目推移圖；各製程依該製程唯一投入PPID計算，單一不良項目會標示點位不良率；只顯示有投入PPID的日期或區間');$('trendSummary').textContent=trend.dates.length+' 個有投入的日期區間 · 製程：'+processPicker.label+' · 顯示 '+visible.length+'／'+trend.series.length+' 條線';

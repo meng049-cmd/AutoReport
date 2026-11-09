@@ -124,6 +124,29 @@ export function addTrendProcessUnit(units,row){
 }
 export const trendDefectName=row=>row.defect||'【未填不良項目】';
 
+export function trendOrderBreakdown(analysis, filters, series, bucket) {
+ const scope = {...filters, process:series.process, date:'', defect:''};
+ if (bucket) {
+  if (!scope.startDate || bucket.start > scope.startDate) scope.startDate = bucket.start;
+  if (!scope.endDate || bucket.end < scope.endDate) scope.endDate = bucket.end;
+ }
+ const units = new Map();
+ for (const row of filteredObservations(analysis, scope)) {
+  if (!row.attributionOnly) addTrendProcessUnit(units, row);
+ }
+ const orders = new Map();
+ for (const row of units.values()) {
+  const order = orderName(row.order);
+  if (!orders.has(order)) orders.set(order, {order,input:0,count:0});
+  const group = orders.get(order);
+  group.input++;
+  if (row.fail && trendDefectName(row) === series.defectName) group.count++;
+ }
+ return [...orders.values()]
+  .map(group => ({...group,rate:group.count/group.input}))
+  .sort((a,b) => b.count-a.count || a.order.localeCompare(b.order,'zh-Hant',{numeric:true}));
+}
+
 // Each PPID belongs to one product within the summarized period.
 export function poolTrendCounts(products) {
  const result = {input:0,count:0,defects:new Map()};

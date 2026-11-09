@@ -2,7 +2,7 @@ import '../merge-core.js';
 import '../yield-core.js';
 import '../quality-core.js';
 import '../indexed-detail-store.js';
-import {addTrendProcessUnit,trendDefectName} from './defect-analysis.mjs';
+import {addTrendProcessUnit,trendDefectName,trendOrderBreakdown} from './defect-analysis.mjs';
 
 import {summarizeStage} from './stage-metrics.mjs';
 
@@ -39,7 +39,7 @@ function summarize(analysis){
  return {input:analysis.total,count:analysis.fail,products,processes};
 }
 
-self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext}})=>{
+self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext,orderScope}})=>{
  const label=mode==='day'?'當日':'本週';
  try{
   const merger=new globalThis.DetailMerger(null,{skipInvalidRows});
@@ -55,7 +55,10 @@ self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext}})=
    merger.completeIndexed();
   }
   const analysis=globalThis.analyzeQuality(merger);
-  if(stageContext){
+  if (orderScope) {
+   const productIds = orderScope.productIds === null ? null : new Set(orderScope.productIds);
+   self.postMessage({orderRows:trendOrderBreakdown(analysis,{productIds},orderScope)});
+  } else if(stageContext){
    const rowsByProduct=new Map();
    for(const row of analysis.observations){
     if(!rowsByProduct.has(row.product))rowsByProduct.set(row.product,[]);

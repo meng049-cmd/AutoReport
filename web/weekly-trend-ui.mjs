@@ -4,6 +4,7 @@ import {createDefectTrendWorkbook,trendColors} from './chart-export.mjs';
 import {renderTrendProductChart} from './quality-extras.mjs';
 import {poolTrendCounts} from './defect-analysis.mjs';
 import {createTrendPicker} from './trend-picker.mjs';
+import {mountTrendOrderDetail} from './trend-order-detail.mjs';
 
 const $=id=>document.getElementById(id);
 const number=value=>value==null?'—':value.toLocaleString();
@@ -11,6 +12,7 @@ const percent=value=>value==null?'—':(value*100).toFixed(2)+'%';
 const DAY=86400000;
 let results=[],sourceFiles=[],selection=new Set(),available=[],trend,controller,mode='week',productDetail;
 const hidden=new Set();
+let disposeOrderDetail, orderSkipInvalidRows;
 const unitLabel=()=>mode==='day'?'日':'週';
 const periodLabel=()=>mode==='day'?'當日':'本週';
 const productPicker = createTrendPicker($('weeklyTrendProduct'), '產品', changeTrendScope);
@@ -47,7 +49,7 @@ function buildJobs(range,sources,unit){
  }
  return [...jobs.values()].sort((a,b)=>a.period.start_date.localeCompare(b.period.start_date));
 }
-function calculate(job,skipInvalidRows,signal){
+function calculate(job,skipInvalidRows,signal,orderScope){
  signal.throwIfAborted();
  return new Promise((resolve,reject)=>{
   const worker=new Worker(new URL('./weekly-trend-worker.js?v='+__BUILD_ID__,import.meta.url),{type:'module'});
@@ -56,12 +58,15 @@ function calculate(job,skipInvalidRows,signal){
   signal.addEventListener('abort',cancel,{once:true});
   worker.onmessage=({data})=>{cleanup();data.error?reject(Error(data.error)):resolve(data);};
   worker.onerror=()=>{cleanup();reject(Error(periodLabel()+'計算未完成，請確認來源檔及瀏覽器可用記憶體。'));};
-  worker.postMessage({period:job.period,sources:job.sources,skipInvalidRows,mode});
+  worker.postMessage({period:job.period,sources:job.sources,skipInvalidRows,mode,orderScope});
  });
 }
 
 export async function runWeeklyTrend(range,sources,files,{skipInvalidRows=false,unit='week',preserveFilters=false}={}){
  if(controller)return;
+ disposeOrderDetail?.();
+ disposeOrderDetail = null;
+ orderSkipInvalidRows = skipInvalidRows;
  mode=unit==='day'?'day':'week';
  const axis=unitLabel(),title=mode==='day'?'日推移':'跨週推移';
  controller=new AbortController();
@@ -96,7 +101,7 @@ export async function runWeeklyTrend(range,sources,files,{skipInvalidRows=false,
  }catch(error){if(!signal.aborted)failure=error.message;}
  finally{controller=null;cancel.hidden=true;}
  if(failure){progress.textContent=failure;return;}
- results=jobs.map((job,i)=>completed[i]||{label:job.label,...job.period,status:'pending'});
+ results=jobs.map((job,i)=>({...(completed[i]||{label:job.label,...job.period,status:'pending'}),sourceJob:job}));
  if(mode==='day')results=results.filter(period=>period.status!=='empty');
  if(!results.length){progress.textContent='所選期間沒有可顯示的日期。';return;}
  const counts=status=>results.filter(period=>period.status===status).length;
@@ -127,14 +132,14 @@ function showResult(range,preserveFilters){
  $('weeklyTrendExport').textContent='下載'+(daily?'日推移':'跨週推移')+' Excel';
  $('weeklyTrendScope').textContent=range.start_date+' ～ '+range.end_date+' · 共 '+results.length+' '+axis;
  $('weeklyTrendPeriodLabel').textContent=daily?'日期':'週別';
- $('weeklyTrendDetailSummary').textContent=daily?'每日統計明細':'每週統計明細';
+ $('weeklyTrendDetailSummary').textContent=daily?'點位明細（日）':'點位明細（週）';
  $('weeklyTrendWeek').setAttribute('aria-label',daily?'日推移統計日期':'跨週統計明細週別');
  $('weeklyTrendChart').setAttribute('aria-label','逐'+axis+'不良率折線圖');
  $('weeklyTrendWarningsTitle').textContent=daily?'查看無法計算的日期':'查看無法計算的週';
  $('weeklyTrendHelp').textContent=daily
   ?'每天獨立去重。有投入但該項無不良時顯示 0%。沒有來源投入的日期略過，無法計算的日期留空。'
   :'每個週點獨立去重。該製程有投入、該項無不良時顯示 0%；無投入或未完成的週留空。';
- $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC。';
+ $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC，展開點位明細可查看工單。';
  $('weeklyTrendExportError').hidden=true;
  if (!preserveFilters) hidden.clear();
  productPicker.setOptions([...products].sort((a,b) => a[1].localeCompare(b[1],'zh-Hant')), preserveFilters ? productPicker.selection : null);
@@ -360,6 +365,8 @@ function renderProductDetail(){
  if(rows.length)renderTrendProductChart(rows,line.color,host,totals);
 }
 function renderWeekDetail(){
+ disposeOrderDetail?.();
+ disposeOrderDetail = null;
  const index=Number($('weeklyTrendWeek').value),week=results[index],host=$('weeklyTrendPointTable');
  host.replaceChildren();
  if(!week)return;
@@ -389,6 +396,13 @@ function renderWeekDetail(){
   for(const value of [number(point.input),number(point.count),percent(point.rate)])row.insertCell().textContent=value;
  }
  host.append(table);
+ const productIds = productPicker.selection === null ? null : [...productPicker.selection];
+ disposeOrderDetail = mountTrendOrderDetail($('weeklyTrendOrderDetail'),week.label,rows,async (line,signal) => {
+  const {orderRows} = await calculate(week.sourceJob,orderSkipInvalidRows,signal,{
+   process:line.process,defectName:line.defectName,productIds
+  });
+  return orderRows;
+ });
 }
 
 $('weeklyTrendCancel').onclick=()=>{if(controller){$('weeklyTrendCancel').disabled=true;controller.abort();}};
