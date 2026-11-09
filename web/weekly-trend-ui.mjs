@@ -2,6 +2,8 @@ import {periods} from './detail-index.mjs';
 import {getWeeklyTrendCache,saveWeeklyTrendCache} from './analysis-cache.mjs';
 import {createDefectTrendWorkbook,trendColors} from './chart-export.mjs';
 import {renderTrendProductChart} from './quality-extras.mjs';
+import {poolTrendCounts} from './defect-analysis.mjs';
+import {createTrendPicker} from './trend-picker.mjs';
 
 const $=id=>document.getElementById(id);
 const number=value=>value==null?'—':value.toLocaleString();
@@ -11,6 +13,12 @@ let results=[],sourceFiles=[],selection=new Set(),available=[],trend,controller,
 const hidden=new Set();
 const unitLabel=()=>mode==='day'?'日':'週';
 const periodLabel=()=>mode==='day'?'當日':'本週';
+const productPicker = createTrendPicker($('weeklyTrendProduct'), '產品', changeTrendScope);
+const processPicker = createTrendPicker($('weeklyTrendProcess'), '製程', changeTrendScope);
+function changeTrendScope() {
+ updateAvailable(selection);
+}
+
 
 function buildJobs(range,sources,unit){
  const jobs=new Map();
@@ -115,7 +123,7 @@ function showResult(range,preserveFilters){
  }
  warnings.parentElement.hidden=!warnings.children.length;
  const daily=mode==='day',axis=unitLabel();
- $('weeklyTrendTitle').textContent=daily?'每日不良率推移':'跨週不良率推移';
+ $('weeklyTrendTitle').textContent='不良率項目推移圖（'+axis+'）';
  $('weeklyTrendExport').textContent='下載'+(daily?'日推移':'跨週推移')+' Excel';
  $('weeklyTrendScope').textContent=range.start_date+' ～ '+range.end_date+' · 共 '+results.length+' '+axis;
  $('weeklyTrendPeriodLabel').textContent=daily?'日期':'週別';
@@ -128,9 +136,9 @@ function showResult(range,preserveFilters){
   :'每個週點獨立去重。該製程有投入、該項無不良時顯示 0%；無投入或未完成的週留空。';
  $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC。';
  $('weeklyTrendExportError').hidden=true;
- if(!preserveFilters){hidden.clear();$('weeklyTrendProduct').value='';$('weeklyTrendProcess').value='';}
- setOptions('weeklyTrendProduct',[...products].sort((a,b)=>a[1].localeCompare(b[1],'zh-Hant')),'全部產品');
- setOptions('weeklyTrendProcess',[...processes].sort().map(process=>[process,process]),'全部製程');
+ if (!preserveFilters) hidden.clear();
+ productPicker.setOptions([...products].sort((a,b) => a[1].localeCompare(b[1],'zh-Hant')), preserveFilters ? productPicker.selection : null);
+ processPicker.setOptions([...processes].sort().map(process => [process,process]), preserveFilters ? processPicker.selection : null);
  setOptions('weeklyTrendWeek',results.map((week,i)=>[i,daily?week.label:week.label+'（'+week.start_date+' ～ '+week.end_date+'）']));
  $('weeklyTrendWeek').value=String(Math.max(0,results.findIndex(week=>week.status==='ready')));
  $('weeklyTrendPointDetails').open=false;
@@ -139,15 +147,18 @@ function showResult(range,preserveFilters){
  updateAvailable(preserveFilters?selection:null);
 }
 function updateAvailable(previousSelection=null){
- const product=$('weeklyTrendProduct').value,process=$('weeklyTrendProcess').value,definitions=new Map(),processInputs=new Map();
- for(const week of results){
-  week.groups=new Map();
-  for(const [name,all] of week.summary?.processes||[]){
-   if(process&&process!==name)continue;
-   const group=product?all.products.find(([id])=>id===product)?.[1]:all;
-   if(!group)continue;
+ const productIds = productPicker.selection, processNames = processPicker.selection;
+ const definitions = new Map(), processInputs = new Map();
+ for (const week of results) {
+  week.groups = new Map();
+  for (const [name,all] of week.summary?.processes || []) {
+   if (processNames && !processNames.has(name)) continue;
+   const group = productIds === null
+    ? all
+    : poolTrendCounts(all.products.filter(([id]) => productIds.has(id)).map(([,stats]) => stats));
+   if (!group.input) continue;
    processInputs.set(name,(processInputs.get(name)||0)+group.input);
-   const defects=new Map(group.defects);
+   const defects = new Map(group.defects);
    week.groups.set(name,{input:group.input,count:group.count,defects});
    for(const [defect,count] of defects){
     const key=JSON.stringify([name,defect]);
@@ -160,14 +171,15 @@ function updateAvailable(previousSelection=null){
  if(!previousSelection)hidden.clear();
  const retained=previousSelection&&available.filter(item=>previousSelection.has(item.key));
  const displayed=retained&&(retained.length||!previousSelection.size)?retained:available.slice(0,5);
- selection=new Set(displayed.map(item=>item.key));
+ if (available.length || !previousSelection) selection=new Set(displayed.map(item=>item.key));
  $('weeklyTrendSearch').value='';
  renderChoices();
  renderTrend();
 }
 function updateItemCount(){
- const visible=[...selection].filter(key=>!hidden.has(key)).length;
- $('weeklyTrendItemCount').textContent='不良項目（已選 '+selection.size+'／'+available.length+' · 顯示 '+visible+'）';
+ const chosen=available.filter(item=>selection.has(item.key));
+ const visible=chosen.filter(item=>!hidden.has(item.key)).length;
+ $('weeklyTrendItemCount').textContent='不良項目（已選 '+chosen.length+'／'+available.length+' · 顯示 '+visible+'）';
 }
 function renderChoices(){
  const host=$('weeklyTrendChoices'),query=$('weeklyTrendSearch').value.trim().toLowerCase();
@@ -189,10 +201,16 @@ function renderChoices(){
 }
 function renderTrend(){
  closeProductDetail();
- const product=$('weeklyTrendProduct').value,process=$('weeklyTrendProcess').value;
- const dates=results.map(week=>{
-  const group=process?week.groups.get(process):product?week.summary?.products.find(item=>item.id===product):week.summary;
-  return {label:week.label,start:week.start_date,end:week.end_date,input:group?.input||null,count:group?.count??null,rate:null};
+ const productIds = productPicker.selection, processNames = processPicker.selection;
+ const dates = results.map(week => {
+  // Process summaries overlap in PPID. Only publish a combined total when it is exact.
+  let group;
+  if (processNames === null) {
+   group = productIds === null ? week.summary : poolTrendCounts(week.summary?.products.filter(item => productIds.has(item.id)) || []);
+  } else if (processNames.size === 1) {
+   group = week.groups.get([...processNames][0]);
+  }
+  return {label:week.label,start:week.start_date,end:week.end_date,input:group?.input||null,count:group?.input?group.count:null,hasInput:week.groups.size>0,rate:null};
  });
  const chosen=available.flatMap((item,i)=>selection.has(item.key)?[{...item,color:trendColors[i%trendColors.length]}]:[]);
  const series=chosen.filter(item=>!hidden.has(item.key)).map(item=>({
@@ -226,7 +244,7 @@ function drawChart(chosen){
  ctx.textAlign='center';
  const step=Math.max(1,Math.ceil((mode==='day'?78:62)/slot));
  for(let i=0;i<dates.length;i+=step){
-  ctx.fillStyle=dates[i].input?'#17324a':'#64778a';
+  ctx.fillStyle=dates[i].hasInput?'#17324a':'#64778a';
   ctx.fillText(dates[i].label,x(i),height-(mode==='day'?20:29));
   if(mode==='week'&&slot>=76)ctx.fillText(dates[i].start.slice(5)+'～'+dates[i].end.slice(5),x(i),height-12);
  }
@@ -316,14 +334,14 @@ function renderProductDetail(){
  const host=$('weeklyTrendMachineTable'),scope=$('weeklyTrendMachineScope');
  host.replaceChildren();
  if(!productDetail)return;
- const {line}=productDetail,filter=$('weeklyTrendProduct').value,value=$('weeklyTrendMachinePeriod').value;
+ const {line}=productDetail,productIds=productPicker.selection,value=$('weeklyTrendMachinePeriod').value;
  const totals=value==='',periods=totals?results:[results[Number(value)]],groups=new Map();
  for(const period of periods){
   const process=period?.summary?.processes.find(([name])=>name===line.process)?.[1];
   if(!process)continue;
   const products=new Map(period.summary.products.map(product=>[product.id,product]));
   for(const [id,stats] of process.products){
-   if(filter&&id!==filter)continue;
+   if(productIds&&!productIds.has(id))continue;
    let group=groups.get(id);
    if(!group){
     const product=products.get(id);
@@ -351,7 +369,11 @@ function renderWeekDetail(){
   return;
  }
  const date=trend.dates[index],rows=trend.series.filter(line=>line.points[index].input);
- status.textContent=date.input?'範圍唯一投入 '+number(date.input)+' PPID'+(rows.length?'。':'。'+periodLabel()+'沒有符合目前選擇的不良項目。'):'目前篩選條件在'+periodLabel()+'無投入。';
+ if (date.input) {
+  status.textContent = '範圍唯一投入 '+number(date.input)+' PPID。'+(rows.length ? '' : periodLabel()+'沒有符合目前選擇的不良項目。');
+ } else {
+  status.textContent = date.hasInput ? '各製程的唯一投入 PPID 如下。' : '目前篩選條件在'+periodLabel()+'無投入。';
+ }
  if(!rows.length)return;
  const table=document.createElement('table'),head=table.createTHead().insertRow(),body=table.createTBody();
  for(const title of ['製程','不良項目','投入 PPID','不良 PPID','不良率']){
@@ -370,8 +392,6 @@ function renderWeekDetail(){
 }
 
 $('weeklyTrendCancel').onclick=()=>{if(controller){$('weeklyTrendCancel').disabled=true;controller.abort();}};
-$('weeklyTrendProduct').onchange=()=>updateAvailable();
-$('weeklyTrendProcess').onchange=()=>updateAvailable();
 $('weeklyTrendSearch').oninput=renderChoices;
 $('weeklyTrendWeek').onchange=()=>{closeProductDetail();renderWeekDetail();};
 $('weeklyTrendMachinePeriod').onchange=renderProductDetail;
@@ -391,8 +411,8 @@ $('weeklyTrendExport').onclick=async()=>{
  try{
   const bytes=await createDefectTrendWorkbook(trend,{
    keepEmptyPeriods:true,sources:sourceFiles,snapshot,imageWidth:parseFloat(canvas.style.width),imageHeight:260,
-   scope:[$('weeklyTrendScope').textContent,$('weeklyTrendProduct').selectedOptions[0]?.textContent,$('weeklyTrendProcess').selectedOptions[0]?.textContent].filter(Boolean).join(' · '),
-   notes:[['橫軸日期單位',axis],['去重口徑','每個'+axis+'點獨立計算，同一 PPID 跨'+axis+'可在各'+axis+'計入一次。']],
+   scope:[$('weeklyTrendScope').textContent,productPicker.label,processPicker.label].filter(Boolean).join(' · '),
+   notes:[['橫軸日期單位',axis],['製程複選','選取部分且多個製程時，請查看推移明細中的各製程投入。日期投入頁的範圍唯一投入與不良欄位留空。'],['去重口徑','每個'+axis+'點獨立計算，同一 PPID 跨'+axis+'可在各'+axis+'計入一次。']],
    sheets:[{name:daily?'各日狀態':'各週狀態',rows:[[daily?'日期':'週別','納入起日','納入迄日','狀態'],...results.map(week=>[week.label,week.start_date,week.end_date,week.error||{ready:'已計算',empty:'無投入',pending:'尚未計算'}[week.status]])]}]
   });
   const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));

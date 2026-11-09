@@ -1,5 +1,35 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
-import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions} from './defect-analysis.mjs';
+import {usesGroupInputRate,defectChartValue,scopedQualitySummary,dateInputAudits,calendarDates,defectBreakdown,allDefectLevels,cohortInput,defectKey,parseDefectKey,defectFilterLabel,periodKey,periodBounds,calendarBuckets,attributedRows,workOrderRows,periodLabel,orderYieldRows,defectTrend,orderStageSeries,selectTrendSeries,defectDimensions,trendProductBreakdown,poolTrendCounts} from './defect-analysis.mjs';
+
+test('trend multi-selection keeps unique PPID denominators per process and limits machine details to selected products',()=>{
+ const date='2026-10-25',p1='DAF外觀',p2='功能一測試',p3='功能二測試';
+ const row=(serial,product,process,defect='')=>({serial,product,process,date,defect,fail:!!defect,status:defect?'FAIL':'GOOD'});
+ const observations=[
+  row('shared','A',p1,'dust'),row('shared','A',p2,'dust'),row('shared','A',p1),
+  row('b','B',p1,'scratch'),row('b','B',p2),row('c','B',p2),row('outside','C',p1,'dust'),
+  row('other-process','B',p3,'dust'),row('outside-process','A',p3,'scratch')
+ ];
+ const analysis={observations,products:['A','B','C'].map(id=>({id,ic:'IC',model:id}))};
+ const scope={startDate:date,endDate:date,granularity:'day',stage:'指定製程',productIds:new Set(['A','B']),processNames:new Set([p1,p2])};
+ const all=defectTrend(analysis,scope);
+ const selected=selectTrendSeries(all,all.series.map(line=>line.key));
+ assert.equal(selected.dates[0].input,3,'a PPID shared across processes counts once in the scope total');
+ assert.deepEqual(selected.series.map(line=>[line.process,line.defectName,line.points[0].input,line.points[0].count]).sort(),[
+  [p1,'dust',2,1],[p1,'scratch',2,1],[p2,'dust',3,1]
+ ].sort());
+ const line=selected.series.find(item=>item.process===p1&&item.defectName==='dust');
+ assert.deepEqual(trendProductBreakdown(analysis,scope,line,selected.dates[0]).map(item=>[item.model,item.input,item.count]),[['A',1,1]]);
+ assert.equal(defectTrend(analysis,{...scope,processNames:new Set()}).dates.length,0);
+});
+
+test('trend-only summaries pool product PPID counts before dividing',()=>{
+ const stats=poolTrendCounts([
+  {input:2,count:1,defects:[['dust',1]]},
+  {input:8,count:3,defects:[['dust',2],['scratch',1]]}
+ ]);
+ assert.deepEqual(stats,{input:10,count:4,defects:new Map([['dust',3],['scratch',1]])});
+ assert.equal(stats.defects.get('dust')/stats.input,.3);
+});
 const ctx=vm.createContext({});for(const file of ['vendor/xlsx.full.min.js','merge-core.js','quality-core.js'])vm.runInContext(readFileSync(file,'utf8'),ctx);
 test('trend exposure unions PPIDs across eligible processes and period dates, excluding AOI rows rather than whole PPIDs',()=>{
  const header=['製程','工單','料號','品名','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],book=ctx.XLSX.utils.book_new(),merger=new ctx.DetailMerger(ctx.XLSX);

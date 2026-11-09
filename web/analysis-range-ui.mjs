@@ -63,7 +63,6 @@ async function calculateTrend(preserveFilters=false){
 }
 $('weeklyTrendCalculate').onclick=()=>calculateTrend();
 $('weeklyTrendAxis').onchange=()=>{
- $('weeklyTrendCalculate').textContent=$('weeklyTrendAxis').value==='day'?'計算日推移':'跨週推移';
  if(!$('weeklyTrendResult').hidden)calculateTrend(true);
 };
 libraryEvents.addEventListener('change',()=>refresh());libraryReady.then(()=>refresh(true));

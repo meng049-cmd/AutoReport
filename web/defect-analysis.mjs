@@ -33,7 +33,7 @@ export function calendarBuckets(start,end,mode='day'){
 export function scopedBuckets(start,end,filters={}){const buckets=calendarBuckets(start,end,filters.granularity);return filters.granularity==='day'&&filters.days?.length?buckets.filter(bucket=>filters.days.includes(bucket.key)):buckets;}
 export const orderName=value=>String(value??'').trim()||'【未填工單】';
 export const dateFilterUnit=filters=>filters.dateUnit||filters.granularity||'day';
-function matches(row,filters,ignoreDefect=false){return !filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.days?.length||filters.days.includes(row.date))&&(!filters.date||periodKey(row.date,dateFilterUnit(filters))===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
+function matches(row,filters,ignoreDefect=false){return (!filters.productIds||filters.productIds.has(row.product))&&(!filters.processNames||filters.processNames.has(row.process))&&!filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.days?.length||filters.days.includes(row.date))&&(!filters.date||periodKey(row.date,dateFilterUnit(filters))===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
 export function attributedRows(analysis,filters={}){const scope=processScope(filters);return analysis.attribution.filter(row=>matches(row,scope));}
 export function filteredObservations(analysis,filters={}){const scope=processScope(filters);return (analysis.observations||[]).filter(row=>matches(row,scope,true));}
 /** Current-period quality uses actual scoped observations, with each PPID counted once. */
@@ -123,6 +123,19 @@ export function addTrendProcessUnit(units,row){
  if(!old||(!old.fail&&row.fail)||(row.fail&&row.status==='FAIL'&&old.status!=='FAIL'))units.set(row.serial,row);
 }
 export const trendDefectName=row=>row.defect||'【未填不良項目】';
+
+// Each PPID belongs to one product within the summarized period.
+export function poolTrendCounts(products) {
+ const result = {input:0,count:0,defects:new Map()};
+ for (const product of products) {
+  result.input += product.input;
+  result.count += product.count;
+  for (const [name,count] of product.defects || []) {
+   result.defects.set(name,(result.defects.get(name)||0)+count);
+  }
+ }
+ return result;
+}
 
 /** Use the same PPID selection as each plotted period, then deduplicate the detail range. */
 export function trendProductBreakdown(analysis,filters,series,bucket){
