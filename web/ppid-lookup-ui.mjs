@@ -2,93 +2,134 @@ import {libraryReady,listLibraryFiles,libraryCollection} from './file-library.mj
 import {navigate} from './navigation.mjs';
 import ExcelJS from 'exceljs';
 
-const $=id=>document.getElementById(id),worker=new Worker(new URL('../ppid-lookup-worker.js?v='+__BUILD_ID__,import.meta.url));
-let nextId=0,scopeIds=null,scopeCollection='detail',lastMatches=[],lastPpids=[],lastWarnings=[],lastTruncated=false;
+const $=id=>document.getElementById(id);
+const pageSize=100;
+let nextId=0,resultPage=0,lastMatches=[],lastPpids=[],lastWarnings=[],schemas=new Map(),filesById=new Map(),lastColumns=[];
 const pending=new Map();
-worker.onmessage=({data})=>{const request=pending.get(data.id);if(!request)return;pending.delete(data.id);if(data.error)request.reject(Error(data.error));else request.resolve(data);};
-worker.onerror=()=>{for(const request of pending.values())request.reject(Error('PPID 查找工具載入失敗，請重新整理頁面。'));pending.clear();};
-function call(type,payload={},transfer=[]){return new Promise((resolve,reject)=>{const id=++nextId;pending.set(id,{resolve,reject});worker.postMessage({id,type,...payload},transfer);});}
+function attachWorker(){
+ const lookupWorker=new Worker(new URL('../ppid-lookup-worker.js?v='+__BUILD_ID__,import.meta.url));
+ lookupWorker.onmessage=({data})=>{
+  const request=pending.get(data.id);if(!request)return;
+  if(data.type==='chunk'){
+   try{request.onChunk?.(data);}catch(error){request.chunkError??=error;}finally{lookupWorker.postMessage({id:data.id,type:'ack'});}return;
+  }
+  pending.delete(data.id);
+  if(data.error)request.reject(Error(data.error));else if(request.chunkError)request.reject(request.chunkError);else request.resolve(data);
+ };
+ lookupWorker.onerror=()=>{for(const request of pending.values())request.reject(Error('PPID 查找工作程式中斷，該檔案無法完整讀取。'));pending.clear();lookupWorker.terminate();worker=attachWorker();};
+ return lookupWorker;
+}
+let worker=attachWorker();
+function call(type,payload={},transfer=[],onChunk){return new Promise((resolve,reject)=>{const id=++nextId;pending.set(id,{resolve,reject,onChunk});worker.postMessage({id,type,...payload},transfer);});}
 function canonical(value){return String(value??'').normalize('NFKC').trim().toLocaleUpperCase('en-US');}
+function compact(value){return canonical(value).replace(/[\s_\-./\\#]/g,'');}
 function setStatus(value,error=false){$('ppidStatus').textContent=value;$('ppidStatus').className=error?'warn':'muted';}
-function clearResults(){ $('ppidResults').replaceChildren();$('ppidSummary').textContent='';$('ppidDownload').disabled=true;lastMatches=[];lastPpids=[];lastWarnings=[];lastTruncated=false; }
+function clearResults(){
+ $('ppidResults').replaceChildren();$('ppidSummary').textContent='';$('ppidDownload').disabled=true;
+ $('ppidPager').hidden=true;$('ppidMissing').textContent='';
+ lastMatches=[];lastPpids=[];lastWarnings=[];schemas=new Map();filesById=new Map();lastColumns=[];resultPage=0;
+}
 function button(label,action){const element=document.createElement('button');element.type='button';element.className='secondary';element.textContent=label;element.onclick=action;return element;}
-function libraryButton(match){return button(match.collection==='analysis'?'查看分析報表':match.collection==='mergedDetail'?'查看合併 Detail':'查看 Detail 比對檔案',()=>window.dispatchEvent(new CustomEvent('library-open-ppid-file',{detail:{id:match.id}})));}
-function collectionName(collection=scopeCollection){return collection==='analysis'?'分析報表':collection==='mergedDetail'?'合併 Detail':'Detail 比對';}
-function visibleMatches(){const process=canonical($('ppidProcess').value);return process?lastMatches.filter(item=>canonical(item.process)===process):lastMatches;}
-function resultColumns(matches){const columns=[],seen=new Set();for(const match of matches){const counts=new Map();for(const name of match.headers||[]){const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);const key=JSON.stringify([name,occurrence]);if(!seen.has(key)){seen.add(key);columns.push({name,key});}}}return columns;}
-function rowValues(match,columns){const values=new Map(),counts=new Map();(match.headers||[]).forEach((name,index)=>{const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);values.set(JSON.stringify([name,occurrence]),match.rowData?.[index]??'');});return columns.map(column=>values.get(column.key)??'');}
-function renderResults(ppids,matches,warnings,truncated){
- const selectedProcess=$('ppidProcess').value;
- const visible=selectedProcess?matches.filter(item=>canonical(item.process)===canonical(selectedProcess)):matches;
- const processes=[...new Set(matches.map(item=>item.process).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-TW'));
- const processSelect=$('ppidProcess'),previous=processSelect.value;
- processSelect.replaceChildren(new Option('全部製程',''),...processes.map(value=>new Option(value,value)));
- if(processes.some(value=>canonical(value)===canonical(previous)))processSelect.value=processes.find(value=>canonical(value)===canonical(previous));
- const found=new Set(matches.map(match=>canonical(match.ppid))),missing=ppids.filter(item=>!found.has(item.canonical));
- const reportCount=visible.filter(item=>item.collection==='analysis').length,mergedCount=visible.filter(item=>item.collection==='mergedDetail').length,detailCount=visible.length-reportCount-mergedCount;
- $('ppidSummary').textContent=`輸入 ${ppids.length} 個 PPID；符合目前製程 ${visible.length} 筆（分析報表 ${reportCount} 筆、Detail 比對 ${detailCount} 筆、合併 Detail ${mergedCount} 筆）；未找到 ${missing.length} 個。`+(truncated?' 已達 10,000 筆結果上限。':'');
- const table=document.createElement('table'),head=table.createTHead().insertRow();
- const columns=resultColumns(visible);
- for(const label of ['查找來源','檔案','分頁／列號',...columns.map(column=>column.name),'返回檔案庫']){const th=document.createElement('th');th.textContent=label;head.append(th);}
+function libraryButton(match){return button('查看來源檔案',()=>window.dispatchEvent(new CustomEvent('library-open-ppid-file',{detail:{id:match.fileId}})));}
+function resultColumns(){
+ const columns=[],seen=new Set();
+ for(const schema of schemas.values()){
+  const counts=new Map();
+  for(const name of schema.headers){const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);const key=JSON.stringify([name,occurrence]);if(!seen.has(key)){seen.add(key);columns.push({name,key});}}
+ }
+ return columns;
+}
+function rowValues(match,columns){
+ const schema=schemas.get(match.schemaId),values=new Map(),counts=new Map();
+ (schema?.headers||[]).forEach((name,index)=>{const occurrence=(counts.get(name)||0)+1;counts.set(name,occurrence);values.set(JSON.stringify([name,occurrence]),match.rowData?.[index]??'');});
+ return columns.map(column=>values.get(column.key)??'');
+}
+function sourceLabel(collection){return collection==='raw'?'Raw Data 原始檔':collection==='mergedDetail'?'歷史合併 Detail':collection==='analysis'?'分析報表':'Detail 比對';}
+function resultTimeColumns(headers){return headers.map((name,index)=>({name,index})).filter(({name})=>/(時間|日期|過站|測試|TIME|DATE|TIMESTAMP|DATETIME)/i.test(name));}
+function recordTime(match){
+ const columns=schemas.get(match.schemaId)?.timeColumns||[],date=columns.find(({name})=>/(日期|DATE)/i.test(name)),time=columns.find(({name})=>/(時間|TIME)/i.test(name));
+ const combined=date&&time&&date.index!==time.index?[match.rowData[date.index],match.rowData[time.index]].filter(Boolean).join(' '):'';
+ for(const value of [combined,...columns.map(({index})=>match.rowData[index])])if(value){const parsed=Date.parse(value);if(!Number.isNaN(parsed))return parsed;}
+ return null;
+}
+function missingPpids(){const found=new Set(lastMatches.map(match=>canonical(match.ppid)));return lastPpids.filter(item=>!found.has(item.canonical));}
+function renderResults(){
+ const matches=lastMatches,missing=missingPpids(),total=matches.length,pages=Math.ceil(total/pageSize),start=resultPage*pageSize,end=Math.min(start+pageSize,total),visible=matches.slice(start,end);
+ const collectionCounts=new Map();for(const match of matches){const file=filesById.get(match.fileId);if(file)collectionCounts.set(file.collection,(collectionCounts.get(file.collection)||0)+1);}
+ const sourceSummary=[...collectionCounts].map(([collection,count])=>`${sourceLabel(collection)} ${count} 筆`).join('、');
+ $('ppidSummary').textContent=`輸入 ${lastPpids.length} 個 PPID；完整履歷 ${total} 筆${sourceSummary?'（'+sourceSummary+'）':''}；未找到 ${missing.length} 個。`;
+ $('ppidMissing').textContent=missing.length?`未找到履歷：${missing.map(item=>item.label).join('、')}`:'';
+ $('ppidPageInfo').textContent=total?`第 ${resultPage+1}／${pages} 頁，每頁 ${pageSize} 筆（共 ${total} 筆）`:'共 0 筆履歷';
+ $('ppidPrev').disabled=resultPage===0;$('ppidNext').disabled=!pages||resultPage>=pages-1;$('ppidPager').hidden=total<=pageSize;
+ if(!total){$('ppidResults').replaceChildren();return;}
+ const table=document.createElement('table'),head=table.createTHead().insertRow(),columns=lastColumns;
+ for(const label of ['查找來源','檔案','分頁／列號','查找 PPID',...columns.map(column=>column.name),'來源檔案庫']){const th=document.createElement('th');th.textContent=label;head.append(th);}
  const body=table.createTBody();
- for(const match of visible){const row=body.insertRow();for(const value of [match.source,match.name,`${match.sheet}／${match.row}`,...rowValues(match,columns)])row.insertCell().textContent=value||'—';row.insertCell().append(libraryButton(match));}
- for(const item of missing){const row=body.insertRow();row.className='warn';row.insertCell().textContent=item.label;const cell=row.insertCell();cell.colSpan=columns.length+3;cell.textContent=`所選${collectionName()}檔案庫沒有此 PPID。`;}
+ for(const match of visible){
+  const file=filesById.get(match.fileId),row=body.insertRow();
+  for(const value of [file?.source||'',file?.name||'',`${match.sheet}／${match.row}`,match.ppid,...rowValues(match,columns)])row.insertCell().textContent=value||'—';
+  row.insertCell().append(libraryButton(match));
+ }
  $('ppidResults').replaceChildren(table);
- $('ppidDownload').disabled=!ppids.length;
- if(warnings.length)setStatus('部分檔案略過：'+warnings.join('；'),true);
- else if(ppids.length)setStatus('查找完成。');
 }
 async function search(){
  const pasted=$('ppidText').value,sourceFile=$('ppidExcel').files[0];
  if(!pasted.trim()&&!sourceFile){setStatus('請批次貼上 PPID，或選擇 Excel／CSV 清單。',true);return;}
- const button=$('ppidSearch'),cancelText=button.textContent;button.disabled=true;button.textContent='正在查找…';clearResults();$('ppidProcess').value='';
+ const searchButton=$('ppidSearch'),cancelText=searchButton.textContent;searchButton.disabled=true;searchButton.textContent='正在查找…';clearResults();
  try{
-  await libraryReady;
-  setStatus('正在整理 PPID 清單…');
+  await libraryReady;setStatus('正在整理 PPID 清單…');
   const inputBuffer=sourceFile?await sourceFile.arrayBuffer():null,parsed=await call('parse',{text:pasted,name:sourceFile?.name,buffer:inputBuffer},inputBuffer?[inputBuffer]:[]),ppids=parsed.ppids;
   if(!ppids.length)throw Error('沒有讀到可查找的 PPID，請確認 Excel 第一欄或欄名 PPID／小板序號。');
-  const all=listLibraryFiles(),files=all.filter(item=>libraryCollection(item)===scopeCollection&&(scopeCollection==='analysis'?item.kind==='analysis':item.detail)&&(!scopeIds||scopeIds.has(item.id)));
-  const matches=[],warnings=[];let truncated=false;
-  const scan=async(files,source)=>{
-   for(let index=0;index<files.length;index++){
-    if(matches.length>=10000)break;
-    const entry=files[index];setStatus(`正在查找${source}：${index+1}/${files.length}（${entry.name}）`);
-    if(entry.size>100*1024*1024){warnings.push(`${entry.name} 超過 100 MB`);continue;}
-    try{
-     const buffer=await entry.blob.arrayBuffer(),result=await call('search',{file:{id:entry.id,name:entry.name,collection:libraryCollection(entry),source},targets:ppids,buffer},[buffer]);
-     if(result.warning)warnings.push(`${entry.name}：${result.warning}`);
-     for(const match of result.matches)matches.push(match);
-     if(result.truncated){truncated=true;break;}
-     if(matches.length>=10000){truncated=true;break;}
-    }catch(error){warnings.push(`${entry.name}：${error.message}`);}
-   }
-  };
-  if(!files.length)setStatus(`所選${collectionName()}檔案庫沒有可查檔案。`);
-  await scan(files,collectionName());
-  lastMatches=matches;lastPpids=ppids;lastWarnings=warnings;lastTruncated=truncated;
-  renderResults(ppids,matches,warnings,truncated);
- }catch(error){setStatus(error.message,true);}finally{button.disabled=false;button.textContent=cancelText;}
+  lastPpids=ppids;
+  const all=listLibraryFiles(),matches=[],warnings=[];let filesCompleted=0,filesWithoutPpidColumn=0;
+  if(!all.length)setStatus('本機所有檔案庫目前沒有可查找檔案。');
+  for(let index=0;index<all.length;index++){
+   const entry=all[index],collection=libraryCollection(entry),file={id:entry.id,name:entry.name,collection,source:sourceLabel(collection)};
+   filesById.set(entry.id,file);setStatus(`正在掃描全部檔案：${index+1}/${all.length}（${entry.name}；已找到 ${matches.length.toLocaleString()} 筆）`);
+   try{
+    const buffer=await entry.blob.arrayBuffer();
+    const result=await call('search',{file,targets:ppids,buffer},[buffer],({schema,rows})=>{
+     if(!schemas.has(schema.id)){schema.timeColumns=resultTimeColumns(schema.headers);schemas.set(schema.id,schema);}
+     for(const row of rows){const match={fileId:entry.id,schemaId:schema.id,sheet:schema.sheet,row:row.row,ppid:row.ppid,rowData:row.rowData};match.time=recordTime(match);matches.push(match);}
+     if(matches.length&&matches.length%10000<rows.length)setStatus(`正在掃描全部檔案：${index+1}/${all.length}（已找到 ${matches.length.toLocaleString()} 筆）`);
+    });
+    if(result.warning)warnings.push(`${entry.name}：${result.warning}`);else if(!result.sheetsScanned)filesWithoutPpidColumn++;
+   }catch(error){warnings.push(`${entry.name}：${error.message}`);for(let matchIndex=matches.length-1;matchIndex>=0;matchIndex--)if(matches[matchIndex].fileId===entry.id)matches.splice(matchIndex,1);for(const schemaId of schemas.keys())if(schemaId.startsWith(`${entry.id}\u0000`))schemas.delete(schemaId);}
+   filesCompleted++;
+  }
+  const ppidOrder=new Map(ppids.map((item,index)=>[item.canonical,index]));
+  matches.sort((a,b)=>{
+   const order=(ppidOrder.get(canonical(a.ppid))??Number.MAX_SAFE_INTEGER)-(ppidOrder.get(canonical(b.ppid))??Number.MAX_SAFE_INTEGER);if(order)return order;
+   if(a.time!==null&&b.time!==null&&a.time!==b.time)return a.time-b.time;if(a.time!==null&&b.time===null)return -1;if(a.time===null&&b.time!==null)return 1;return 0;
+  });
+  lastMatches=matches;lastWarnings=warnings;lastColumns=resultColumns();renderResults();$('ppidDownload').disabled=false;
+  if(warnings.length)setStatus(`查找完成，共掃描 ${filesCompleted} 份檔案；${filesWithoutPpidColumn} 份沒有可辨識 PPID 欄位，以下檔案無法讀取：${warnings.join('；')}`,true);
+  else setStatus(`查找完成，已掃描本機全部 ${filesCompleted} 份檔案；${filesWithoutPpidColumn} 份沒有可辨識 PPID 欄位。`);
+ }catch(error){setStatus(error.message,true);}finally{searchButton.disabled=false;searchButton.textContent=cancelText;}
 }
 $('ppidSearch').onclick=search;
-$('ppidProcess').onchange=()=>renderResults(lastPpids,lastMatches,lastWarnings,lastTruncated);
+$('ppidPrev').onclick=()=>{if(resultPage>0){resultPage--;renderResults();}};
+$('ppidNext').onclick=()=>{if((resultPage+1)*pageSize<lastMatches.length){resultPage++;renderResults();}};
 $('ppidDownload').onclick=async()=>{
  if(!lastPpids.length)return;
  const download=$('ppidDownload');download.disabled=true;
  try{
-  const matches=visibleMatches(),columns=resultColumns(matches),workbook=new ExcelJS.Workbook();
-  const sheet=workbook.addWorksheet('PPID 查找結果');
-  sheet.addRow(['查找來源','來源檔案','分頁','列號',...columns.map(column=>column.name)]);
-  for(const match of matches)sheet.addRow([match.source,match.name,match.sheet,match.row,...rowValues(match,columns)]);
-  sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter={from:'A1',to:{row:1,column:Math.max(4,4+columns.length)}};
-  sheet.getRow(1).font={bold:true};sheet.columns.forEach((column,index)=>{column.width=index<4?20:24;column.numFmt='@';});
-  const found=new Set(lastMatches.map(item=>canonical(item.ppid))),missing=lastPpids.filter(item=>!found.has(item.canonical));
- if(missing.length){const absent=workbook.addWorksheet('未找到 PPID');absent.addRow(['PPID','查找來源']);for(const item of missing)absent.addRow([item.label,collectionName()]);absent.getColumn(1).width=36;absent.getColumn(1).numFmt='@';absent.getColumn(2).width=22;absent.getRow(1).font={bold:true};}
+  const columns=lastColumns,workbook=new ExcelJS.Workbook();let sheetNumber=0,sheet,rowCount=0;
+  const addResultSheet=()=>{
+   const name=sheetNumber?'PPID 查找結果 '+(sheetNumber+1):'PPID 查找結果';sheet=workbook.addWorksheet(name);sheet.addRow(['查找來源','來源檔案','分頁','列號','查找 PPID',...columns.map(column=>column.name)]);sheet.views=[{state:'frozen',ySplit:1}];sheet.getRow(1).font={bold:true};sheet.columns.forEach((column,index)=>{column.width=index<5?22:24;column.numFmt='@';});sheet.autoFilter={from:'A1',to:{row:1,column:Math.max(5,5+columns.length)}};sheetNumber++;rowCount=0;
+  };
+  const maxDataRows=1048575;
+  for(let index=0;index<lastMatches.length;index++){
+   if(!sheet||rowCount>=maxDataRows){addResultSheet();if(sheetNumber>1)setStatus(`正在建立完整 Excel：${index.toLocaleString()}／${lastMatches.length.toLocaleString()} 筆`);}
+   const match=lastMatches[index],file=filesById.get(match.fileId);sheet.addRow([file?.source||'',file?.name||'',match.sheet,match.row,match.ppid,...rowValues(match,columns)]);rowCount++;
+   if(index&&index%10000===0)setStatus(`正在建立完整 Excel：${index.toLocaleString()}／${lastMatches.length.toLocaleString()} 筆`);
+  }
+  const missing=missingPpids();
+  if(missing.length){const absent=workbook.addWorksheet('未找到 PPID');absent.addRow(['PPID','查找範圍']);for(const item of missing)absent.addRow([item.label,'本機全部檔案庫']);absent.getColumn(1).width=36;absent.getColumn(1).numFmt='@';absent.getColumn(2).width=24;absent.getRow(1).font={bold:true};}
+  for(const resultSheet of workbook.worksheets)if(resultSheet.name.startsWith('PPID 查找結果'))resultSheet.autoFilter={from:'A1',to:{row:resultSheet.rowCount,column:Math.max(5,5+columns.length)}};
   const bytes=await workbook.xlsx.writeBuffer(),url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),anchor=document.createElement('a');
-  anchor.href=url;anchor.download=`AUTOREPORT_PPID查找結果_${new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'})}.xlsx`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  anchor.href=url;anchor.download=`AUTOREPORT_PPID完整履歷_${new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'})}.xlsx`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus(`完整履歷 Excel 已下載，共 ${lastMatches.length.toLocaleString()} 筆。`);
  }catch(error){setStatus('下載失敗：'+error.message,true);}finally{download.disabled=false;}
 };
-$('ppidClear').onclick=()=>{$('ppidText').value='';$('ppidExcel').value='';$('ppidProcess').value='';clearResults();setStatus('');};
-$('ppidChooseReports').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'analysis'}}));
-$('ppidChooseDetails').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'detail'}}));
-$('ppidChooseMergedDetails').onclick=()=>window.dispatchEvent(new CustomEvent('library-choose-ppid',{detail:{collection:'mergedDetail'}}));
-window.addEventListener('ppid-lookup-files',({detail})=>{const ids=detail?.ids||[];scopeCollection=['analysis','mergedDetail'].includes(detail?.collection)?detail.collection:'detail';scopeIds=ids.length?new Set(ids):null;clearResults();$('ppidProcess').replaceChildren(new Option('全部製程',''));navigate('ppidLookup');setStatus(scopeIds?`查找範圍：已選取 ${ids.length} 份${collectionName()}檔案。`:`查找範圍：全部${collectionName()}檔案。`);});
+$('ppidClear').onclick=()=>{$('ppidText').value='';$('ppidExcel').value='';clearResults();setStatus('');};
+window.addEventListener('ppid-lookup-files',()=>{clearResults();navigate('ppidLookup');setStatus('查找範圍：本機所有檔案庫，不限檔案或製程。');});

@@ -29,7 +29,7 @@ test('monthly union is calculated from PPIDs across weeks, and outside-period FA
  messages.length=0;await ctx.onmessage({data:{files:[],indexedSources:['a','b'],period:ctx.AutoReportPeriods.periodFor('2026-10-25','month')}});result=messages.at(-1);assert.equal(result.type,'complete',result.message);assert.equal(result.analysis.total,2);assert.equal(result.analysis.fail,2);assert.equal(result.date_count,31);assert.equal(result.analysis.attribution.find(r=>r.serial==='same').defect,'early');assert.match(result.filename,/2026-10_/);
 });
 test('oversized periods stop before loading rows; incomplete indexes never produce partial reports',async()=>{
- const {ctx,messages}=runtime(),items=new Map([['big',{meta:{complete:true,dayCounts:{'2026-10-25':300001}}}]]),scans=useStore(ctx,items);
+ const {ctx,messages}=runtime(),items=new Map([['big',{meta:{complete:true,dayCounts:{'2026-10-25':600001}}}]]),scans=useStore(ctx,items);
  await ctx.onmessage({data:{files:[],indexedSources:['big'],period:ctx.AutoReportPeriods.periodFor('2026-10-25','week')}});assert.equal(messages.at(-1).type,'error');assert.match(messages.at(-1).message,/安全分析容量/);assert.equal(scans(),0);
  await ctx.onmessage({data:{files:[],indexedSources:['missing']}});assert.equal(messages.at(-1).type,'error');assert.match(messages.at(-1).message,/索引尚未完成/);
 });

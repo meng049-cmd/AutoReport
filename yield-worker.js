@@ -1,15 +1,16 @@
 const version=new URL(self.location.href).search;
 importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version);
+const MAX_INDEXED_ROWS=600000;
 self.onmessage=async({data})=>{try{
  const files=data.files||[data.file||data],merger=new DetailMerger(XLSX,{skipInvalidRows:data.skipInvalidRows===true}),started=performance.now(),timings={};let inputBook;
  const period=data.period||null,indexed=Array.isArray(data.indexedSources);
  if(period)AutoReportPeriods.validateRange(period);
  if(indexed){
-  let rowCount=0,maxFileRows=0;for(const key of data.indexedSources){const meta=await AutoReportDetailIndex.meta(key);if(!meta?.complete)throw Error('日期索引尚未完成，請重新建立索引。');const count=AutoReportPeriods.rowsIn(meta,period);rowCount+=count;maxFileRows=Math.max(maxFileRows,count);}
-  if(maxFileRows>300000)throw Error(`此期間包含 ${rowCount.toLocaleString()} 筆索引資料，超出本瀏覽器單次安全分析容量。請改選較短期間（例如由月改為週）；已完成的日期索引會保留。`);
+  let maxFileRows=0;for(const key of data.indexedSources){const meta=await AutoReportDetailIndex.meta(key);if(!meta?.complete)throw Error('日期索引尚未完成，請重新建立索引。');const count=AutoReportPeriods.rowsIn(meta,period);maxFileRows=Math.max(maxFileRows,count);}
+  if(maxFileRows>MAX_INDEXED_ROWS)throw Error(`此期間單一來源超過 60 萬筆索引資料，超出本瀏覽器單次安全分析容量。請改選較短期間；已完成的日期索引會保留。`);
   for(let i=0;i<data.indexedSources.length;i++){
    const key=data.indexedSources[i],meta=await AutoReportDetailIndex.meta(key);self.postMessage({type:'progress',message:`正在載入期間資料 ${i+1}/${data.indexedSources.length}：${meta.name}`});
-   merger.prepareIndexed(meta,period);await AutoReportDetailIndex.scan(key,period,value=>{merger.addIndexed(value);if(merger.rows.size>300000)throw Error('此期間去重後仍超過 30 萬筆過站紀錄，已停止載入以保護瀏覽器。請改選較短期間；已完成的日期索引會保留。');});merger.completeIndexed();
+   merger.prepareIndexed(meta,period);await AutoReportDetailIndex.scan(key,period,value=>{merger.addIndexed(value);if(merger.rows.size>MAX_INDEXED_ROWS)throw Error('此期間去重後仍超過 60 萬筆過站紀錄，已停止載入以保護瀏覽器。請改選較短期間；已完成的日期索引會保留。');});merger.completeIndexed();
   }
  }else{for(let i=0;i<files.length;i++){const file=files[i];self.postMessage({type:'progress',message:`正在讀取並驗證 ${i+1}/${files.length}：${file.name}`});inputBook=DetailMerger.readBook(XLSX,await file.arrayBuffer());merger.add(inputBook,file.name);}}
 
