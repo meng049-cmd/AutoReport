@@ -159,6 +159,29 @@ function renderTrend(){
   if(series.points.length<250||showPointLabels)for(let i=0;i<series.points.length;i++){const point=series.points[i];if(point.rate==null)continue;ctx.beginPath();ctx.fillStyle=series.color;ctx.arc(x(i),y(point.rate),3.2,0,Math.PI*2);ctx.fill();if(showPointLabels){ctx.fillStyle=series.color;ctx.font='600 10px system-ui';ctx.textAlign='center';ctx.fillText(pct(point.rate),x(i),Math.max(12,y(point.rate)-9-seriesIndex*12));}}
  }
  if(!trend.dates.length||!visible.length){ctx.textAlign='center';ctx.fillStyle='#6f8493';ctx.fillText(!trend.dates.length?'目前範圍沒有投入資料':!availableItems.length?'目前條件沒有不良項目':!trend.series.length?'請勾選不良項目':'所有已選項目均已關閉',(width+left-right)/2,top+plotH/2);}
+ const scroll=canvas.parentElement;let lineTooltip=scroll.querySelector('.trend-line-tooltip');
+ if(!lineTooltip){lineTooltip=document.createElement('div');lineTooltip.id='trendLineTooltip';lineTooltip.className='trend-line-tooltip';lineTooltip.hidden=true;lineTooltip.setAttribute('role','tooltip');scroll.append(lineTooltip);canvas.setAttribute('aria-describedby',lineTooltip.id);}
+ const hideLineTooltip=()=>{lineTooltip.hidden=true;};
+ const showLineTooltip=event=>{
+  canvas.removeAttribute('title');
+  const rect=canvas.getBoundingClientRect(),scrollRect=scroll.getBoundingClientRect(),pointerX=event.clientX-rect.left,pointerY=event.clientY-rect.top;
+  const segment=Math.floor((pointerX-left)/slot-.5),first=Math.max(0,segment-1),last=Math.min(trend.dates.length-2,segment+1);let best=null,distance=12;
+  for(const series of visible){
+   if(trend.dates.length===1){const point=series.points[0];if(point?.rate==null)continue;const candidate=Math.hypot(pointerX-x(0),pointerY-y(point.rate));if(candidate<distance){distance=candidate;best={series,index:0,point};}continue;}
+   for(let index=first;index<=last;index++){
+    const start=series.points[index],end=series.points[index+1];if(start?.rate==null||end?.rate==null)continue;
+    const x1=x(index),y1=y(start.rate),dx=x(index+1)-x1,dy=y(end.rate)-y1,length=dx*dx+dy*dy,t=Math.max(0,Math.min(1,((pointerX-x1)*dx+(pointerY-y1)*dy)/(length||1))),candidate=Math.hypot(pointerX-x1-t*dx,pointerY-y1-t*dy);
+    if(candidate<distance){distance=candidate;const pointIndex=t<.5?index:index+1;best={series,index:pointIndex,point:series.points[pointIndex]};}
+   }
+  }
+  if(!best){hideLineTooltip();return;}
+  const {series,index,point}=best,date=trend.dates[index],content=`不良項目：${series.item||series.defectName||series.defect}\n比例：${pct(point.rate)}\n日期：${date.label}`;
+  if(lineTooltip.textContent!==content)lineTooltip.textContent=content;
+  lineTooltip.hidden=false;
+  const localX=event.clientX-scrollRect.left+scroll.scrollLeft,localY=event.clientY-scrollRect.top+scroll.scrollTop;
+  lineTooltip.style.left=Math.max(scroll.scrollLeft+8,Math.min(scroll.scrollLeft+scroll.clientWidth-lineTooltip.offsetWidth-8,localX+12))+'px';
+  lineTooltip.style.top=Math.max(5,localY-lineTooltip.offsetHeight-10)+'px';
+ };
  const legend=$('trendLegend');
  legend.replaceChildren();
  for(const series of trend.series){
@@ -185,11 +208,7 @@ function renderTrend(){
   if(!date||index===inspectedIndex)return;
   inspectedIndex=index;
   const context=date.label+' · '+scopeInputLabel+date.input.toLocaleString()+' PPID';
-  const values=visible.map(series=>{
-   const point=series.points[index];
-   return series.defect+' '+pct(point?.rate)+'（不良唯一PPID '+(point?.count||0)+'／製程唯一投入PPID '+(point?.input||0)+'）';
-  });
-  canvas.title = [context,...values].join(' · ');
+  canvas.title = context;
  };
  const pointDetails = $('trendPointDetails');
  const detailTrend = {...trend,series:visible};
@@ -216,7 +235,7 @@ function renderTrend(){
  };
  if (pointDetails.open) showTable();
  const pointerIndex=event=>Math.floor((event.clientX-canvas.getBoundingClientRect().left-left)/slot);
- canvas.onmousemove=event=>{if (!pointDetails.open) inspect(pointerIndex(event));};
+ canvas.onmousemove=showLineTooltip;canvas.onmouseleave=hideLineTooltip;
  canvas.onclick=event=>{
   const index=pointerIndex(event),bucket=trend.dates[index];
   if(!bucket)return;
