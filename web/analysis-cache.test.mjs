@@ -24,3 +24,13 @@ test('week/month selections have distinct cache keys and completed summary repor
  globalThis.__ANALYSIS_VERSION__='period-v2';assert.equal(await getAnalysisCache({selectionKey:weekKey}),null);assert.equal((await getAnalysisCache({reportId:'summary'})).data.analysis.total,42);
  await clearAnalysisCaches();
 });
+
+test('completed Detail report snapshots survive a calculation-version update without reanalysis',async()=>{
+ globalThis.__ANALYSIS_VERSION__='before-filename-change';await clearAnalysisCaches();
+ await saveAnalysisCache('finished-detail',{includes_detail:true,analysis:{total:500000,stageWeekContext:{cacheKey:'saved'}},filename:'report.xlsx'});
+ globalThis.__ANALYSIS_VERSION__='after-filename-change';
+ const cached=await getAnalysisCache({reportId:'finished-detail'});
+ assert.equal(cached.data.analysis.total,500000);
+ assert.equal(cached.data.analysis.stageWeekContext.cacheKey,'saved');
+ await clearAnalysisCaches();
+});

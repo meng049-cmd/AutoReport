@@ -11,7 +11,10 @@ const version=()=>__ANALYSIS_VERSION__;
 function remember(record){memory.delete(record.key);memory.set(record.key,record);while(memory.size>LIMIT)memory.delete(memory.keys().next().value);}
 function transaction(mode,run){return new Promise((resolve,reject)=>{if(!db){resolve();return;}const tx=db.transaction('results',mode);run(tx.objectStore('results'));tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error);});}
 async function read(key){const generation=epoch;let record=memory.get(key);if(!record){await ready;if(!db)return null;try{await transaction('readonly',store=>{const request=store.get(key);request.onsuccess=()=>{record=request.result;};});}catch{return null;}}
- if(generation!==epoch||(record?.version!==version()&&!(key.startsWith('report:')&&record?.periodSchema===1)))return null;if(record)remember(record);return record||null;
+ // Saved reports are immutable snapshots; selection aliases still require the current calculation version.
+ // includes_detail recognizes reports saved before the explicit report schema was introduced.
+ const completedReport=key.startsWith('report:')&&(record?.periodSchema===1||record?.reportSchema===1||typeof record?.data?.includes_detail==='boolean');
+ if(generation!==epoch||(record?.version!==version()&&!completedReport))return null;if(record)remember(record);return record||null;
 }
 export function analysisSelectionKey(ids,options,sources,referenceSources){return ids?.length?JSON.stringify([ids,options.skipInvalidRows===true,options.period||null,sources,referenceSources]):null;}
 export async function getAnalysisCache({reportId,selectionKey}={}){
@@ -19,7 +22,7 @@ export async function getAnalysisCache({reportId,selectionKey}={}){
  if(!reportId)return null;return read('report:'+reportId);
 }
 export async function saveAnalysisCache(reportId,data,{selectionKey,inputIds=[],downloadBlob}={}){
- const {bytes,merged,...result}=data,generation=epoch,record={key:'report:'+reportId,version:version(),reportId,data:result,downloadBlob,periodSchema:data.includes_detail===false?1:undefined};remember(record);
+ const {bytes,merged,...result}=data,generation=epoch,record={key:'report:'+reportId,version:version(),reportId,data:result,downloadBlob,reportSchema:typeof data.includes_detail==='boolean'?1:undefined,periodSchema:data.includes_detail===false?1:undefined};remember(record);
  const alias=selectionKey?{key:'selection:'+selectionKey,version:version(),reportId,inputIds}:null;if(alias)remember(alias);
  await ready;if(generation!==epoch)return;try{await transaction('readwrite',store=>{store.put(record);if(alias)store.put(alias);});return Boolean(db);}catch{return false;}
 }

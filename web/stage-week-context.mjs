@@ -22,12 +22,14 @@ export async function attachStageWeekContext(data,context,onProgress,signal){
  const previousDay=new Date(Date.parse(current.start+'T00:00:00Z')-DAY).toISOString().slice(0,10);
  const period=periods.periodFor(previousDay,'week');
  const result={key:period.key.replace('_w','-W').replace(/_$/,''),start:period.start_date,end:period.end_date,status:'empty',products:[],sources:[]};
- analysis.stageWeekContext=result;
  const all=listLibraryFiles(),selected=new Set(context.fileIds||[]);
  const selectedSource=all.find(item=>selected.has(item.id)&&item.detail&&libraryCollection(item)!=='analysis');
  const collection=selectedSource?libraryCollection(selectedSource):'detail';
  const files=all.filter(item=>item.detail&&libraryCollection(item)===collection)
   .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+ const cacheKey=JSON.stringify(['stage-week-context-v2',period,context.skipInvalidRows===true,files.map(item=>[item.id,item.name,item.size,item.lastModified,item.createdAt])]);
+ if(analysis.stageWeekContext?.cacheKey===cacheKey&&analysis.stageWeekContext.status!=='error')return false;
+ analysis.stageWeekContext=result;
  const sources=[];
  try{
   for(const item of files){
@@ -38,7 +40,7 @@ export async function attachStageWeekContext(data,context,onProgress,signal){
    const rows=periods.rowsIn(meta,period);
    if(rows)sources.push({id:item.id,key:meta.key,name:item.name,rows});
   }
-  if(!sources.length)return;
+  if(!sources.length){result.cacheKey=cacheKey;return true;}
   onProgress('正在準備 '+result.key+' 前一週階段比較資料…');
   const skipInvalidRows=context.skipInvalidRows===true;
   const key=JSON.stringify(['stage-week-context-v1',period,skipInvalidRows,sources.map(source=>source.key)]);
@@ -48,9 +50,10 @@ export async function attachStageWeekContext(data,context,onProgress,signal){
    saved=await calculate(period,sources,skipInvalidRows,signal);
    await saveWeeklyTrendCache(key,saved,sources.map(source=>source.id));
   }
-  Object.assign(result,{status:'ready',products:saved.stageContext.products,sources:sources.map(({name})=>({name})),skipped:saved.skipped||0});
+  Object.assign(result,{cacheKey,status:'ready',products:saved.stageContext.products,sources:sources.map(({name})=>({name})),skipped:saved.skipped||0});
  }catch(error){
   if(signal?.aborted)throw error;
   result.status='error';result.error=error.message;
  }
+ return true;
 }

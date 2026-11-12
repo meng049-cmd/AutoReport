@@ -1,6 +1,15 @@
 const version=new URL(self.location.href).search;
 importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version);
 const MAX_INDEXED_ROWS=600000;
+function analysisFilename(files,period,stats){
+ const source=files.length===1?files[0].name?.match(/(?:^|_)(\d{4}_w\d{1,2}_\d{4}-\d{4})(?:_|\.xlsx$)/i):null;
+ if(!period&&source)return `${source[1]}_不良分析.xlsx`;
+ const start=period?.start_date||stats.start_date,end=period?.end_date||stats.end_date;
+ const key=(period?.key||AutoReportPeriods.periodFor(start,'week').key).replace(/_$/,'');
+ const compact=day=>day.slice(5).replace('-','');
+ const range=start.slice(0,4)===end.slice(0,4)?`${compact(start)}-${compact(end)}`:`${start}-${end}`;
+ return `${key}_${range}_不良分析.xlsx`;
+}
 self.onmessage=async({data})=>{try{
  const files=data.files||[data.file||data],merger=new DetailMerger(XLSX,{skipInvalidRows:data.skipInvalidRows===true}),started=performance.now(),timings={};let inputBook;
  const period=data.period||null,indexed=Array.isArray(data.indexedSources);
@@ -30,7 +39,7 @@ self.onmessage=async({data})=>{try{
  timings.sheets=performance.now()-phase;
  const jsonMetadata=value=>JSON.stringify(value).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));book.Custprops.AutoReportSources=jsonMetadata(analysis.sources.map(source=>source.name));book.Custprops.AutoReportReferenceSources=jsonMetadata(analysis.referenceSources);
  // Analysis does not create an intermediate merged workbook.
- stats.filename=period?`${period.key.replace(/_$/,'')}_${period.start_date}-${period.end_date}_不良分析.xlsx`:stats.filename.replace('.xlsx','_不良分析.xlsx');
+ stats.filename=analysisFilename(files,period,stats);
  if(indexed){book.Custprops.AutoReportPeriod=JSON.stringify(period);XLSX.utils.sheet_add_aoa(book.Sheets['統計說明'],[['期間分析','以選定日／週／月起訖範圍內資料統一去重及判定首次不良，逐日計算每日良率；完整 Detail 保留在來源檔案庫，本報表只輸出統計與必要不良明細。']],{origin:-1});}
  self.postMessage({type:'progress',message:'分析完成，正在產生 Excel 下載檔…'});
  book.Workbook={...book.Workbook,Sheets:book.SheetNames.map(name=>({name,Hidden:(['計算明細','階段計算明細'].includes(name)||/^Detail(?:_\d+)?$/.test(name))?1:0}))};

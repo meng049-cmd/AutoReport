@@ -22,7 +22,7 @@ export function calculateYieldFile(input,onProgress=()=>{},context={}){
  });
 }
 function clear(){clearQuality();if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=null;$('yieldResult').hidden=true;$('yieldDownload').removeAttribute('href');$('yieldMessage').textContent='';$('thresholdDashboard').hidden=true;}
-async function showReport(data,blob,filename,progress,message,context){await attachStageWeekContext(data,{...getYieldOptions(),...context},progress,controller?.signal);downloadUrl=URL.createObjectURL(blob);const link=$('yieldDownload');link.href=downloadUrl;link.download=filename;link.textContent='下載 '+filename;progress(message+(data.skipped_rows?' 已略過 '+data.skipped_rows+' 列錯誤資料，詳見報表。':''));renderQuality(data.analysis,data.start_date,data.end_date,data.stageChecks,{url:downloadUrl,filename});$('yieldResult').hidden=false;}
+async function showReport(data,blob,filename,progress,message,context){downloadUrl=URL.createObjectURL(blob);const link=$('yieldDownload');link.href=downloadUrl;link.download=filename;link.textContent='下載 '+filename;progress(message+(data.skipped_rows?' 已略過 '+data.skipped_rows+' 列錯誤資料，詳見報表。':''));renderQuality(data.analysis,data.start_date,data.end_date,data.stageChecks,{url:downloadUrl,filename});$('yieldResult').hidden=false;}
 export async function analyzeYieldFiles(files,context={}){
  const progress=text=>{$('yieldMessage').textContent=text;context.onProgress?.(text);};
  if(busy)return;try{validateYieldFiles(files);}catch(error){progress(error.message);return;}if(!beginFileOperation())return;clear();busy=true;controller=new AbortController();$('yieldCancel').hidden=false;const controls=['yieldCalculate','yieldCalculateUpload','yieldFile','yieldSkipErrors','libraryAnalyze'],previous=controls.map(id=>$(id).disabled);controls.forEach(id=>$(id).disabled=true);
@@ -30,7 +30,11 @@ export async function analyzeYieldFiles(files,context={}){
  try{
   const entries=new Map(listLibraryFiles().map(item=>[item.id,item])),single=context.fileIds?.length===1?entries.get(context.fileIds[0]):null,reportId=context.reportId||(single?.kind==='analysis'?single.id:null);
   progress('正在載入分析結果…');const cached=await getAnalysisCache({reportId,selectionKey});const cachedFile=cached&&entries.get(cached.reportId);
-  if(cachedFile){await showReport(cached.data,cached.downloadBlob||cachedFile.blob,cached.data.filename,progress,'已開啟已儲存的分析結果。',context);return;}
+  if(cachedFile){
+   const changed=await attachStageWeekContext(cached.data,{...getYieldOptions(),...context},progress,controller.signal);
+   if(changed)await saveAnalysisCache(cached.reportId,cached.data,{downloadBlob:cached.downloadBlob});
+   await showReport(cached.data,cached.downloadBlob||cachedFile.blob,cached.data.filename,progress,'已開啟已儲存的分析結果。',context);return;
+  }
   if(context.reportId&&entries.get(context.reportId)?.detail===false)throw Error('此為期間彙總報表，完整 Detail 保留在來源檔案庫。看板快取已不存在，請回來源檔案庫依相同週／月重新分析。');
   let indexedSources;
   if(!context.reportId){
@@ -39,6 +43,7 @@ export async function analyzeYieldFiles(files,context={}){
   const data=await calculateYieldFile(files,progress,{...options,indexedSources,signal:controller.signal,includeMerged:false,...(context.sources?{sources:context.sources}:{})});
   const report=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});let savedId=context.reportId;
   if(context.saveReport!==false){const entry=await addLibraryFile(report,{kind:'analysis',detail:data.includes_detail!==false,sources:data.analysis.sources,rows:data.output_rows});savedId=entry.id;}
+  await attachStageWeekContext(data,{...getYieldOptions(),...context},progress,controller.signal);
   let cachedPersistently=true;if(savedId){progress('正在儲存分析快取…');cachedPersistently=await saveAnalysisCache(savedId,data,{selectionKey,inputIds:context.fileIds,downloadBlob:context.saveReport===false?report:undefined});}
   await showReport(data,report,data.filename,progress,context.saveReport===false?'看板已開啟。':'分析完成，報表已加入檔案清單，可點擊下載。'+(cachedPersistently?'':' 看板快取僅保留於本次分頁，請保留來源檔案以便重算。'),context);
  }catch(error){progress(error.message);}finally{busy=false;controller=null;$('yieldCancel').hidden=true;controls.forEach((id,i)=>$(id).disabled=previous[i]);endFileOperation();}
