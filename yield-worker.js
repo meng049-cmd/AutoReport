@@ -1,6 +1,6 @@
 const version=new URL(self.location.href).search;
 importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version);
-const MAX_INDEXED_ROWS=600000;
+const MAX_INDEXED_ROWS=1200000;
 function analysisFilename(files,period,stats){
  const source=files.length===1?files[0].name?.match(/(?:^|_)(\d{4}_w\d{1,2}_\d{4}-\d{4})(?:_|\.xlsx$)/i):null;
  if(!period&&source)return `${source[1]}_不良分析.xlsx`;
@@ -16,10 +16,10 @@ self.onmessage=async({data})=>{try{
  if(period)AutoReportPeriods.validateRange(period);
  if(indexed){
   let maxFileRows=0;for(const key of data.indexedSources){const meta=await AutoReportDetailIndex.meta(key);if(!meta?.complete)throw Error('日期索引尚未完成，請重新建立索引。');const count=AutoReportPeriods.rowsIn(meta,period);maxFileRows=Math.max(maxFileRows,count);}
-  if(maxFileRows>MAX_INDEXED_ROWS)throw Error(`此期間單一來源超過 60 萬筆索引資料，超出本瀏覽器單次安全分析容量。請改選較短期間；已完成的日期索引會保留。`);
+  if(maxFileRows>MAX_INDEXED_ROWS)throw Error(`此期間單一來源超過 120 萬筆索引資料，超出本瀏覽器單次安全分析容量。請改選較短期間；已完成的日期索引會保留。`);
   for(let i=0;i<data.indexedSources.length;i++){
    const key=data.indexedSources[i],meta=await AutoReportDetailIndex.meta(key);self.postMessage({type:'progress',message:`正在載入期間資料 ${i+1}/${data.indexedSources.length}：${meta.name}`});
-   merger.prepareIndexed(meta,period);await AutoReportDetailIndex.scan(key,period,value=>{merger.addIndexed(value);if(merger.rows.size>MAX_INDEXED_ROWS)throw Error('此期間去重後仍超過 60 萬筆過站紀錄，已停止載入以保護瀏覽器。請改選較短期間；已完成的日期索引會保留。');});merger.completeIndexed();
+   merger.prepareIndexed(meta,period);await AutoReportDetailIndex.scan(key,period,value=>{merger.addIndexed(value);if(merger.rows.size>MAX_INDEXED_ROWS)throw Error('此期間去重後仍超過 120 萬筆過站紀錄，已停止載入以保護瀏覽器。請改選較短期間；已完成的日期索引會保留。');});merger.completeIndexed();
   }
  }else{for(let i=0;i<files.length;i++){const file=files[i];self.postMessage({type:'progress',message:`正在讀取並驗證 ${i+1}/${files.length}：${file.name}`});inputBook=DetailMerger.readBook(XLSX,await file.arrayBuffer());merger.add(inputBook,file.name);}}
 

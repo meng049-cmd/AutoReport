@@ -48,7 +48,7 @@ async function previewDetailCompaction(){
  compactPreview={fingerprint,results,failures,removedRows,keptRows,beforeSize,afterSize};
  if(failures.length){$('libraryCompactStatus').textContent=`已掃描 ${items.length} 份，保留 ${keptRows.toLocaleString()} 筆六製程、預計移除 ${removedRows.toLocaleString()} 筆其他製程；${failures.length} 份無法安全處理，確認按鈕已停用。${failures.slice(0,4).join('；')}`;}
  else if(!removedRows){$('libraryCompactStatus').textContent=`已掃描 ${items.length} 份：所有資料均屬六製程，無需精簡。`;}
- else{$('libraryCompactStatus').textContent=`預覽 ${items.length} 份：保留 ${keptRows.toLocaleString()} 筆六製程、移除 ${removedRows.toLocaleString()} 筆其他製程；檔案庫容量約 ${readableBytes(beforeSize)} → ${readableBytes(afterSize)}。這只縮小本機檔案，不會提高 60 萬筆分析上限（索引已只取六製程）。`;
+ else{$('libraryCompactStatus').textContent=`預覽 ${items.length} 份：保留 ${keptRows.toLocaleString()} 筆六製程、移除 ${removedRows.toLocaleString()} 筆其他製程；檔案庫容量約 ${readableBytes(beforeSize)} → ${readableBytes(afterSize)}。這只縮小本機檔案，不會提高 120 萬筆分析上限（索引已只取六製程）。`;
  }
  updateActions();
 }
@@ -72,7 +72,7 @@ async function compactDetailLibrary(){
   }
  }finally{endFileOperation();}
  const result=`本機精簡完成：更新 ${changedFiles} 份 Detail，移除 ${removedRows.toLocaleString()} 筆非六製程資料，保留 ${keptRows.toLocaleString()} 筆六製程資料；${savedBytes>=0?'減少':'增加'} ${readableBytes(Math.abs(savedBytes))}。${indexesPreserved} 份日期索引直接沿用。`;
- $('libraryCompactStatus').textContent=result+(failures.length?` ${failures.length} 份未更新：${failures.slice(0,4).join('；')}`:'')+' 不會提高 60 萬筆分析上限，因為分析索引本來就只計六製程。';updateActions();
+ $('libraryCompactStatus').textContent=result+(failures.length?` ${failures.length} 份未更新：${failures.slice(0,4).join('；')}`:'')+' 不會提高 120 萬筆分析上限，因為分析索引本來就只計六製程。';updateActions();
 }
 $('libraryCompactPreview').onclick=previewDetailCompaction;$('libraryCompactApply').onclick=compactDetailLibrary;
 function openReports(){navigate('reports');$('libraryKind').value='analysis';$('librarySearch').value='';page=0;render();}

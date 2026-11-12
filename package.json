@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node web/build.mjs",
     "test": "node --test --test-concurrency=2 web/range-workflow.test.mjs web/period-analysis.test.mjs web/confirmed-corrections.test.mjs web/navigation-position.test.mjs web/report-sheets.test.mjs web/stage-product-series.test.mjs web/stage-analysis.test.mjs web/analysis-cache.test.mjs web/stage-week-context.test.mjs web/detail-index.test.mjs web/yield-pipeline.test.mjs web/matcher.test.mjs web/detail.test.mjs web/merge.test.mjs web/yield.test.mjs web/quality.test.mjs web/threshold.test.mjs web/chart-export.test.mjs web/defect-analysis.test.mjs",
+    "test:month-capacity": "node --test web/month-capacity.browser.test.mjs",
     "test:browser": "node --test web/browser.spec.mjs web/local-database.spec.mjs"
   },
   "dependencies": {
