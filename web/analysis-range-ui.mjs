@@ -32,7 +32,7 @@ async function refresh(force=false){
  if(libraryIsBusy()||refreshing){update();return;}
  const files=entries(),next=files.map(item=>indexKey(entryFile(item),item.id)).join('|');
  if(!force&&next===signature&&files.every(validMeta)){update();return;}signature=next;refreshing=true;update();
- try{for(const item of files){const meta=await existingIndex(entryFile(item),item.id);if(meta)metas.set(item.id,meta);else metas.delete(item.id);}}
+ try{for(const item of files){if(validMeta(item))continue;const meta=await existingIndex(entryFile(item),item.id);if(meta)metas.set(item.id,meta);else metas.delete(item.id);}}
  catch(error){$('yieldRangeStatus').textContent=error.message;}
  finally{refreshing=false;populate();}
 }
@@ -41,7 +41,7 @@ $('yieldRangeStart').onchange=()=>apply('start');$('yieldRangeEnd').onchange=()=
 $('yieldCancelDateIndex').onclick=()=>controller?.abort();
 $('yieldIndexDates').onclick=async()=>{
  const files=entries();if(!files.length||!beginFileOperation())return;indexing=true;controller=new AbortController();$('yieldCancelDateIndex').hidden=false;
- try{const result=await indexDetailFiles(files.map(entryFile),{ids:files.map(item=>item.id),signal:controller.signal,onProgress:text=>$('yieldRangeStatus').textContent=text});files.forEach((item,i)=>metas.set(item.id,result[i]));populate();}
+ try{const result=await indexDetailFiles(files.map(entryFile),{ids:files.map(item=>item.id),knownMetas:metas,signal:controller.signal,onProgress:text=>$('yieldRangeStatus').textContent=text});files.forEach((item,i)=>metas.set(item.id,result[i]));populate();}
  catch(error){$('yieldMessage').textContent=error.message;signature='';}
  finally{indexing=false;controller=null;$('yieldCancelDateIndex').hidden=true;endFileOperation();}
 };

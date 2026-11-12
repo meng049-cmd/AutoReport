@@ -146,7 +146,7 @@ $('libraryCancelIndex').onclick=()=>indexController?.abort();
 $('libraryIndexDates').onclick=async()=>{
  const items=periodEntries();if(!items.length||!beginFileOperation())return;indexController=new AbortController();$('libraryCancelIndex').hidden=false;
  try{
-  const metas=await indexDetailFiles(items.map(entryFile),{ids:items.map(item=>item.id),signal:indexController.signal,onProgress:message=>$('libraryPurpose').textContent=message});
+  const metas=await indexDetailFiles(items.map(entryFile),{ids:items.map(item=>item.id),knownMetas:periodMetas,signal:indexController.signal,onProgress:message=>$('libraryPurpose').textContent=message});
   items.forEach((item,i)=>periodMetas.set(item.id,metas[i]));$('libraryPurpose').textContent='日期索引已完成。請選擇按週／按月，系統會自動勾選全部相關檔案；分析只讀取選定期間資料。';populatePeriods();
  }catch(error){$('libraryPurpose').textContent=error.message;await refreshPeriodMetadata();}
  finally{indexController=null;$('libraryCancelIndex').hidden=true;endFileOperation();}
