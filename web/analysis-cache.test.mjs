@@ -1,6 +1,6 @@
 import {libraryCollection} from './file-library.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
-import {analysisSelectionKey,getAnalysisCache,saveAnalysisCache,clearAnalysisCaches,removeAnalysisCaches} from './analysis-cache.mjs';
+import {analysisSelectionKey,getAnalysisCache,saveAnalysisCache,clearAnalysisCaches,removeAnalysisCaches,invalidateProductAnalysisCaches,getWeeklyTrendCache,saveWeeklyTrendCache} from './analysis-cache.mjs';
 test('completed analysis cache respects ordered immutable file IDs, skip mode and calculation version, without retaining XLSX buffers',async()=>{
  globalThis.__ANALYSIS_VERSION__='test-v1';await clearAnalysisCaches();
  const key=analysisSelectionKey(['a','b'],{skipInvalidRows:false},[{name:'same.xlsx'}],['reference']);
@@ -32,5 +32,17 @@ test('completed Detail report snapshots survive a calculation-version update wit
  const cached=await getAnalysisCache({reportId:'finished-detail'});
  assert.equal(cached.data.analysis.total,500000);
  assert.equal(cached.data.analysis.stageWeekContext.cacheKey,'saved');
+ await clearAnalysisCaches();
+});
+
+
+test('confirmed product mappings invalidate selection and trend results while preserving saved report snapshots',async()=>{
+ globalThis.__ANALYSIS_VERSION__='corrections';globalThis.__WEEKLY_TREND_VERSION__='corrections';await clearAnalysisCaches();
+ await saveAnalysisCache('saved',{includes_detail:false,analysis:{total:2}},{selectionKey:'pending-selection',inputIds:['source']});
+ await saveWeeklyTrendCache('pending-trend',{input:2},['source']);
+ await invalidateProductAnalysisCaches();
+ assert.equal(await getAnalysisCache({selectionKey:'pending-selection'}),null);
+ assert.equal(await getWeeklyTrendCache('pending-trend'),null);
+ assert.equal((await getAnalysisCache({reportId:'saved'})).data.analysis.total,2);
  await clearAnalysisCaches();
 });

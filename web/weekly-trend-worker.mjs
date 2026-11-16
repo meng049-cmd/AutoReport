@@ -5,6 +5,8 @@ import '../indexed-detail-store.js';
 import {addTrendProcessUnit,trendDefectName,trendOrderBreakdown} from './defect-analysis.mjs';
 
 import {summarizeStage} from './stage-metrics.mjs';
+import '../browser-storage.js';
+import '../analysis-product-corrections.js';
 
 const MAX_ROWS=300000;
 const index=globalThis.AutoReportDetailIndex;
@@ -54,6 +56,7 @@ self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext,ord
    });
    merger.completeIndexed();
   }
+  await globalThis.resolveConfirmedProducts(merger);
   const analysis=globalThis.analyzeQuality(merger);
   if (orderScope) {
    const productIds = orderScope.productIds === null ? null : new Set(orderScope.productIds);

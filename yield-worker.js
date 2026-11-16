@@ -1,5 +1,5 @@
 const version=new URL(self.location.href).search;
-importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version);
+importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version,'browser-storage.js'+version,'analysis-product-corrections.js'+version);
 const MAX_INDEXED_ROWS=1200000;
 function analysisFilename(files,period,stats){
  const source=files.length===1?files[0].name?.match(/(?:^|_)(\d{4}_w\d{1,2}_\d{4}-\d{4})(?:_|\.xlsx$)/i):null;
@@ -25,6 +25,7 @@ self.onmessage=async({data})=>{try{
 
  timings.read=performance.now()-started;let phase=performance.now();
  self.postMessage({type:'progress',message:'正在計算每日製程與階段良率…'});
+ await resolveConfirmedProducts(merger);
  const analysis=analyzeQuality(merger);analysis.skippedRows=merger.skippedRows;
  timings.quality=performance.now()-phase;phase=performance.now();
  analysis.sources=data.sources||[...merger.sources].map(name=>({name,kind:'Detail'}));analysis.referenceSources=data.referenceSources||[];try{const saved=files.length===1?JSON.parse(inputBook?.Custprops?.AutoReportReferenceSources||'null'):null;if(Array.isArray(saved)&&saved.every(name=>typeof name==='string'))analysis.referenceSources=saved;}catch{}inputBook=null;

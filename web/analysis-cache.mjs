@@ -29,6 +29,15 @@ export async function saveAnalysisCache(reportId,data,{selectionKey,inputIds=[],
 export async function removeAnalysisCaches(ids){const removed=new Set(ids);epoch++;const matches=record=>removed.has(record.reportId)||(record.inputIds||[]).some(id=>removed.has(id));for(const [key,record] of memory)if(matches(record))memory.delete(key);await ready;try{await transaction('readwrite',store=>{for(const id of removed)for(const index of ['reportId','inputIds']){const request=store.index(index).openKeyCursor(IDBKeyRange.only(id));request.onsuccess=()=>{const cursor=request.result;if(!cursor)return;store.delete(cursor.primaryKey);cursor.continue();};}});}catch{}}
 export async function clearAnalysisCaches(){epoch++;memory.clear();await ready;try{await transaction('readwrite',store=>store.clear());}catch{}}
 
+// Confirmed mappings change future calculations; saved reports remain snapshots.
+export async function invalidateProductAnalysisCaches(){
+ epoch++;
+ const derived=key=>key.startsWith('selection:')||key.startsWith('weekly-trend:');
+ for(const key of memory.keys())if(derived(key))memory.delete(key);
+ await ready;
+ await transaction('readwrite',store=>{const request=store.openCursor();request.onsuccess=()=>{const cursor=request.result;if(!cursor)return;if(derived(cursor.key))cursor.delete();cursor.continue();};});
+}
+
 export async function getWeeklyTrendCache(key){
  const record=await read('weekly-trend:'+key);
  return record?.weeklyVersion===__WEEKLY_TREND_VERSION__?record.data:null;

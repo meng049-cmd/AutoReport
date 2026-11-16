@@ -7,6 +7,7 @@ import JSZip from 'jszip';
 import {setReferenceSources} from './report-context.mjs';
 import {correctionOrder} from './matcher.mjs';
 import {canonicalCorrectionName} from './match-corrections.mjs';
+import {invalidateProductAnalysisCaches} from './analysis-cache.mjs';
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const worker=new Worker(new URL('./worker.js?v='+__BUILD_ID__,import.meta.url),{type:'module'});
@@ -167,6 +168,7 @@ $('matchConfirmDatabase').onclick=async()=>{
  $('matchCorrectionFields').disabled=true;
  try{
   const {reference,count}=await databaseCall('confirmCorrections',items);
+  await invalidateProductAnalysisCaches();
   await call('reload',{reference});applyDatabaseStats(await call('stats'));databaseChannel?.postMessage('changed');
   $('matchCorrectionSaveStatus').textContent=`已確認並儲存 ${count} 組對照；未來相同工單／料號可自動比對。需要雲端備份時，請按「上傳本機資料」。`;
  }catch(e){$('matchCorrectionSaveStatus').textContent=e.message;}
@@ -240,7 +242,7 @@ $('databaseDownload').onclick=async()=>{try{const bytes=await databaseCall('down
 
 const databaseChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('AutoReport-database-changes'):null;
 function clearDatabaseResults(){clearDownload();resetMatchCorrections();$('uploadResults').innerHTML='';$('searchResults').innerHTML='';if(databaseDownloadUrl){URL.revokeObjectURL(databaseDownloadUrl);databaseDownloadUrl=null;}}
-if(databaseChannel)databaseChannel.onmessage=async({data})=>{if(data==='cleared'){for(const input of document.querySelectorAll('input[type=file]'))input.value='';location.reload();return;}try{await call('refresh');applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseStatus').textContent='另一個分頁已更新資料庫，已同步最新資料。';}catch(e){$('databaseStatus').textContent=e.message;}};
+if(databaseChannel)databaseChannel.onmessage=async({data})=>{if(data==='cleared'){for(const input of document.querySelectorAll('input[type=file]'))input.value='';location.reload();return;}try{await invalidateProductAnalysisCaches();await call('refresh');applyDatabaseStats(await call('stats'));clearDatabaseResults();$('databaseStatus').textContent='另一個分頁已更新資料庫，已同步最新資料。';}catch(e){$('databaseStatus').textContent=e.message;}};
 $('databaseClear').onclick=async()=>{
  if(libraryIsBusy())return;if(!confirm('確定清空本瀏覽器資料庫？所有對照及匯入清單將刪除，無法復原。建議先下載 SQLite 備份。'))return;
  if(!beginFileOperation())return;const controls=['databaseClear','databaseUpload','databaseDownload','databaseFile','lookup','match','fulltext','file','export'];
