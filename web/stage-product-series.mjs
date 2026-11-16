@@ -2,6 +2,10 @@ import {buildStageAnalysis} from './stage-analysis.mjs';
 import {summarizeStage,isStageProcess} from './stage-metrics.mjs';
 import {calendarBuckets} from './defect-analysis.mjs';
 
+export function stageChartDateLabel(row){
+ return row.kind==='week'?row.date.replace(/^\d{4}-/,''):row.date.slice(5);
+}
+
 export function productStageSeries(analysis,productId,stage,start,end,days=[]){
  const products=analysis.products.filter(product=>product.id===productId);
  const productRows=(analysis.observations||[]).filter(row=>row.product===productId);

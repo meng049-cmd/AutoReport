@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {productStageSeries} from './stage-product-series.mjs';
+import {productStageSeries,stageChartDateLabel} from './stage-product-series.mjs';
 const products=[{id:'g',ic:'GOODIX',model:'CY26-16'},{id:'s',ic:'Synaptis',model:'CY26-16'}];
 const row=(product,serial,date,fail=false)=>({product,serial,date,process:'功能一測試',fail,status:fail?'FAIL':'GOOD'});
+test('stage chart labels omit the year for week and day categories',()=>{
+ assert.equal(stageChartDateLabel({kind:'week',date:'2026-W43'}),'W43');
+ assert.equal(stageChartDateLabel({kind:'day',date:'2026-11-09'}),'11-09');
+});
 test('IC plus model separates products and weekly counts deduplicate across days',()=>{
  const analysis={products,observations:[row('g','a','2026-10-05'),row('g','a','2026-10-06'),row('g','b','2026-10-06',true),row('s','s','2026-10-06',true)]};
  const g=productStageSeries(analysis,'g','前段','2026-10-05','2026-10-11'),s=productStageSeries(analysis,'s','前段','2026-10-05','2026-10-11');

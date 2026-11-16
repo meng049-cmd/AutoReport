@@ -7,29 +7,29 @@ const chartNs='http://schemas.openxmlformats.org/drawingml/2006/chart';
 const drawingNs='http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
 const relNs='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const chartRelNs='http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart';
-function inlineCache(values,kind){
+function inlineCache(values,kind,numberFormat='0.0%'){
  const pointXml=values.map((value,index)=>value==null?'':`<c:pt idx="${index}"><c:v>${esc(value)}</c:v></c:pt>`).join('');
- return `<c:${kind}Cache>${kind==='num'&&'<c:formatCode>0.0%</c:formatCode>'||''}<c:ptCount val="${values.length}"/>${pointXml}</c:${kind}Cache>`;
+ return `<c:${kind}Cache>${kind==='num'?`<c:formatCode>${numberFormat}</c:formatCode>`:''}<c:ptCount val="${values.length}"/>${pointXml}</c:${kind}Cache>`;
 }
-function seriesXml({index,title,column,categories,values,color,pointColors=[],line=false,showPoints=false,showPointLabels=false,sheetName='每日階段良率'}){
+function seriesXml({index,title,column,categories,categoryColumn='A',values,color,pointColors=[],line=false,showPoints=false,showPointLabels=false,numberFormat='0.0%',sheetName='每日階段良率'}){
  const formula=`'${sheetName}'!$${column}$2:$${column}$${categories.length+1}`;
  const titleFormula=`'${sheetName}'!$${column}$1`;
- const catFormula=`'${sheetName}'!$A$2:$A$${categories.length+1}`;
+ const catFormula=`'${sheetName}'!$${categoryColumn}$2:$${categoryColumn}$${categories.length+1}`;
  const tx=`<c:tx><c:strRef><c:f>${titleFormula}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>`;
  const cat=`<c:cat><c:strRef><c:f>${catFormula}</c:f>${inlineCache(categories,'str')}</c:strRef></c:cat>`;
- const val=`<c:val><c:numRef><c:f>${formula}</c:f>${inlineCache(values,'num')}</c:numRef></c:val>`;
+ const val=`<c:val><c:numRef><c:f>${formula}</c:f>${inlineCache(values,'num',numberFormat)}</c:numRef></c:val>`;
  const shape=line?`<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="${String(color||'396ED4').replace(/^#/,'')}"/></a:solidFill></a:ln></c:spPr>`:`<c:spPr><a:solidFill><a:srgbClr val="${String(color).replace(/^#/,'')}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr>`;
  const marker=line?(showPoints?'<c:marker><c:symbol val="circle"/><c:size val="5"/></c:marker>':'<c:marker><c:symbol val="none"/></c:marker>'):'';
- const labels=line?(showPointLabels?`<c:dLbls><c:numFmt formatCode="0.00%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`:''):`<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`;
+ const labels=line?(showPointLabels?`<c:dLbls><c:numFmt formatCode="0.00%" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`:''):`<c:dLbls><c:numFmt formatCode="${numberFormat}" sourceLinked="0"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>`;
  const points=pointColors.map((color,index)=>color?`<c:dPt><c:idx val="${index}"/><c:spPr><a:solidFill><a:srgbClr val="${String(color).replace(/^#/,'')}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr></c:dPt>`:'').join('');
  return `<c:ser><c:idx val="${index}"/><c:order val="${index}"/>${tx}${shape}${marker}${points}${labels}${cat}${val}</c:ser>`;
 }
 function chartXml(stage,rows){
- const cats=rows.map(r=>r.date),actual=rows.map(r=>r.value),targets=rows.map(()=>stage.target);
+ const cats=stage.categoryLabels||rows.map(r=>r.date),categoryColumn=stage.categoryColumn||'A',numberFormat=stage.kind==='defect'?'0.0%':'0.00%',actual=rows.map(r=>r.value),targets=rows.map(()=>stage.target);
  const measured=actual.filter(value=>value!=null),isDefect=stage.kind==='defect',min=isDefect?0:Math.min(.95,Math.floor((measured.length?measured.reduce((min,value)=>Math.min(min,value),1):.95)*20)/20),max=isDefect?measured.reduce((max,value)=>Math.max(max,value),Math.max(.01,stage.target))*1.12:1.005,majorUnit=isDefect?max/5:min<.4?.1:min<.9?.05:.01,sheetName=stage.sheetName||'每日階段良率';
- const bars=seriesXml({index:0,title:stage.valueLabel||`${stage.title}良率`,sheetName,column:'B',categories:cats,values:actual,color:stage.color,pointColors:rows.map(row=>row.kind==='week'?'FFC000':null)});
- const line=seriesXml({index:1,title:stage.referenceLabel||'Target',sheetName,column:'C',categories:cats,values:targets,line:true});
- const title=esc(stage.chartTitle||`${stage.title} 每日階段良率`);
+ const bars=seriesXml({index:0,title:stage.valueLabel||`${stage.title}良率`,sheetName,column:'B',categories:cats,categoryColumn,values:actual,color:stage.color,pointColors:rows.map(row=>row.kind==='week'?'FFC000':null),numberFormat});
+ const line=seriesXml({index:1,title:stage.referenceLabel||'Target',sheetName,column:'C',categories:cats,categoryColumn,values:targets,line:true,numberFormat});
+ const title=esc(stage.chartTitle||`${stage.title} 每日良率`);
  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${chartNs}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${relNs}"><c:lang val="zh-TW"/><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:rPr lang="zh-TW" sz="1500" b="1"/><a:t>${title}</a:t></a:r><a:endParaRPr lang="zh-TW"/></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${bars}<c:gapWidth val="70"/><c:overlap val="0"/><c:axId val="10"/><c:axId val="20"/></c:barChart><c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${line}<c:marker val="0"/><c:smooth val="0"/><c:axId val="10"/><c:axId val="20"/></c:lineChart><c:catAx><c:axId val="10"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="20"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx><c:valAx><c:axId val="20"/><c:scaling><c:orientation val="minMax"/><c:max val="${max}"/><c:min val="${min}"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="DCE4EC"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="10"/><c:crosses val="autoZero"/><c:majorUnit val="${majorUnit}"/></c:valAx></c:plotArea><c:legend><c:legendPos val="t"/><c:layout/><c:overlay val="0"/></c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/><c:showDLblsOverMax val="0"/></c:chart></c:chartSpace>`;
 }
 function drawingXml(startCol=4){
@@ -44,6 +44,8 @@ export async function createStageChartWorkbook(stage,rows,options={}){
  if(options.trend){sheet.columns=[{header:'日期區間',key:'date',width:28},...options.trend.series.map((series,index)=>({header:series.defect,key:'series'+index,width:24}))];for(let i=0;i<rows.length;i++)sheet.addRow([rows[i].date,...options.trend.series.map(series=>series.points[i]?.rate??null)]);}
  else{sheet.columns=[{header:stage.categoryLabel||'日期',key:'date',width:28},{header:stage.valueLabel||`${stage.title}良率`,key:'actual',width:22},{header:stage.referenceLabel||'Target',key:'target',width:18},...(options.inputCounts?[{header:'投入唯一PPID',key:'input',width:18}]:[]),...(options.badCounts?[{header:'不良唯一PPID',key:'bad',width:18}]:[])];
  for(const [index,row] of rows.entries())sheet.addRow({date:row.date,actual:row.value,target:stage.target,input:options.inputCounts?.[index],bad:options.badCounts?.[index]});}
+ let categoryColumn='A';
+ if(rows.length&&options.categoryLabels?.length===rows.length){const categoryIndex=sheet.columnCount+1;categoryColumn=columnName(categoryIndex);sheet.getColumn(categoryIndex).header='圖表標籤';sheet.getColumn(categoryIndex).hidden=true;for(const [index,label] of options.categoryLabels.entries())sheet.getCell(index+2,categoryIndex).value=label;}
  if(!options.trend&&options.inputCounts&&options.badCounts){for(const [index,row] of rows.entries())if(row.value!=null)sheet.getCell(index+2,2).value={formula:`IFERROR(E${index+2}/D${index+2},"")`,result:row.value};}
  if(!options.trend&&rows.some(row=>Array.isArray(row.processRows))){
   const processes=stageProcesses(stage.key),data=book.addWorksheet('製程良率資料');data.addRow(['日期',...processes]);
@@ -63,7 +65,7 @@ const notes=addTable({name:'統計說明',rows:[['項目','說明'],['範圍',op
  // ExcelJS emits an editAs attribute on oneCellAnchor; OOXML allows it only on twoCellAnchor.
  for(const name of Object.keys(zip.files).filter(name=>/^xl\/drawings\/drawing\d+\.xml$/.test(name))){const xml=await zip.file(name).async('string');zip.file(name,xml.replace(/(<xdr:oneCellAnchor) editAs="[^"]*"/g,'$1'));}
  const existingDrawings=Object.keys(zip.files).map(name=>name.match(/^xl\/drawings\/drawing(\d+)\.xml$/)?.[1]).filter(Boolean).map(Number),drawingId=Math.max(0,...existingDrawings)+1;
- const chart=options.trend?trendChartXml(stage,rows,options.trend):chartXml(stage,rows);
+ const chart=options.trend?trendChartXml(stage,rows,options.trend):chartXml({...stage,categoryColumn,categoryLabels:options.categoryLabels},rows);
  const pages=[{sheetId:sheet.id,drawingId,chartId:1,startCol:4}];
  if(linkedChartSheet)pages.push({sheetId:linkedChartSheet,drawingId:drawingId+1,chartId:2,startCol:0});
  let types=await zip.file('[Content_Types].xml').async('string');
