@@ -14,9 +14,10 @@ test('reopening a persisted dashboard skips index reads and comparison work unti
   getWeeklyTrendCache:async()=>{calls.cache++;return {stageContext:{products:[]}};},saveWeeklyTrendCache:async()=>{}});
  const source=readFileSync('web/stage-week-context.mjs','utf8').replace(/^import .*;\n/gm,'').replace('export async function','async function').replaceAll('import.meta.url', '"https://example.test/"');
  vm.runInContext(source,ctx);
- const data={start_date:'2026-11-01',analysis:{}};
+ const data={start_date:'2026-10-25',end_date:'2026-11-01',analysis:{}};
  assert.equal(await ctx.attachStageWeekContext(data,{},()=>{}),true);
  assert.equal(data.analysis.stageWeekContext.status,'ready');
+ assert.equal(data.analysis.stageWeekContext.key,'2026-W42');
  const restored=structuredClone(data);
  assert.equal(await ctx.attachStageWeekContext(restored,{},()=>{}),false);
  assert.deepEqual(calls,{reads:1,builds:0,cache:1});

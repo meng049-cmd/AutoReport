@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
-import {productStageSeries} from './stage-product-series.mjs';
+import {productStageSeries,stageChartDateLabel} from './stage-product-series.mjs';
 import {createStageChartWorkbook} from './chart-export.mjs';
 
 const products=[{id:'p',ic:'Goodix',model:'B24'}];
@@ -21,7 +21,7 @@ test('previous calendar week uses its own unique PPIDs outside the daily display
  assert.equal(model.weeks[0].input,2);
  assert.equal(model.weeks[0].value,.5);
  assert.equal(model.weeks[1].input,2);
- assert.deepEqual(model.daily.map(item=>item.date),['2026-10-27','2026-10-28']);
+ assert.deepEqual(model.daily.map(item=>item.date),['2026-10-25','2026-10-26','2026-10-27','2026-10-28','2026-10-29','2026-10-30','2026-10-31']);
 });
 
 test('context adds the missing prior week for both stages without adding prior daily rows',()=>{
@@ -36,15 +36,15 @@ test('context adds the missing prior week for both stages without adding prior d
  }};
  for(const stage of ['前段','後段']){
   const model=productStageSeries(analysis,'p',stage,'2026-10-25','2026-10-31');
-  assert.deepEqual(model.chartRows.map(item=>item.date),['2026-W41','2026-W42','2026-10-27']);
+  assert.deepEqual(model.chartRows.map(item=>item.date),['2026-W41','2026-W42','2026-10-25','2026-10-26','2026-10-27','2026-10-28','2026-10-29','2026-10-30','2026-10-31']);
   assert.equal(model.weeks[0].input,stage==='前段'?40:35);
   assert.equal(model.period.input,1);
  }
 });
 
-test('missing context creates a notice instead of a fictitious prior-week bar',()=>{
+test('missing context retains a blank prior-week slot and a notice',()=>{
  const model=productStageSeries({products,observations:[row('a','2026-10-27')]},'p','前段','2026-10-25','2026-10-31');
- assert.deepEqual(model.weeks.map(item=>item.date),['2026-W42']);
+ assert.deepEqual(model.weeks.map(item=>item.date),['2026-W41','2026-W42']);assert.equal(model.weeks[0].input,0);assert.equal(model.weeks[0].value,null);
  assert.match(model.comparisonNote,/2026-W41/);
 });
 
@@ -55,7 +55,7 @@ test('year-boundary prior week and day multi-selection keep their own scopes',()
  const model=productStageSeries(analysis,'p','前段','2027-01-04','2027-01-06',['2027-01-04']);
  assert.deepEqual(model.weeks.map(item=>item.date),['2026-W51','2026-W52']);
  assert.equal(model.weeks[1].value,1);
- assert.equal(model.daily.length,1);
+ assert.equal(model.daily.length,3);assert.equal(model.daily[1].value,null);assert.equal(model.daily[2].value,null);
 });
 
 test('both editable charts share numeric source ranges and weekly point fills',async()=>{
@@ -121,4 +121,20 @@ test('linked stage export preserves a true zero and a missing yield distinctly',
  const sheet=book.getWorksheet('每日階段良率');
  assert.equal(sheet.getCell('B2').value,0);
  assert.equal(sheet.getCell('B3').value,null);
+});
+
+test('an empty stage exports both native charts with all calendar slots and blank yields',async()=>{
+ const model=productStageSeries({products,observations:[]},'p','後段','2026-11-09','2026-11-13');
+ const labels=['W43','W44','11-09','11-10','11-11','11-12','11-13'];
+ const bytes=await createStageChartWorkbook({key:'後段',title:'B24-Goodix · 後段',target:.99,color:'#d54545'},model.chartRows,{linkedChartCopy:true,categoryLabels:model.chartRows.map(stageChartDateLabel),inputCounts:model.chartRows.map(row=>row.input)});
+ const book=new ExcelJS.Workbook();await book.xlsx.load(bytes);const sheet=book.getWorksheet('每日階段良率');
+ assert.deepEqual(sheet.getColumn('A').values.slice(2),labels);
+ for(let r=2;r<=8;r++){assert.equal(sheet.getCell(r,2).value,null);assert.equal(sheet.getCell(r,3).value,.99);assert.equal(sheet.getCell(r,4).value,0);}
+ const zip=await JSZip.loadAsync(bytes);
+ for(const id of [1,2]){
+  const xml=await zip.file(`xl/charts/chart${id}.xml`).async('string'),bar=xml.match(/<c:barChart>[\s\S]*?<\/c:barChart>/)[0];
+  const values=bar.match(/<c:numCache>[\s\S]*?<\/c:numCache>/)[0];
+  assert.match(values,/<c:ptCount val="7"\/>/);assert.doesNotMatch(values,/<c:pt /);
+  assert.match(xml,/<c:dispBlanksAs val="gap"\/>/);assert.match(xml,/每日階段良率'!\$A\$2:\$A\$8/);
+ }
 });

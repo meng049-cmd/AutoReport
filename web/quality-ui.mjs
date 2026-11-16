@@ -24,7 +24,7 @@ function setupStageGroups(){
   const model=(product.model||'【待補機種】')+'-'+(product.ic||'【待補IC】');
   const section=document.createElement('section');section.className='stage-model-group';section.dataset.model=model;
   const heading=document.createElement('h3');heading.textContent='產品：'+model;
-  const note=document.createElement('p');note.className='muted';note.textContent='IC＋機種 → 前段／後段 → 日期 → 製程 → 不良項目。左側列前一週、當週的黃色長條，再列所選日期的紅色長條。前一週比較採用 Detail 檔案庫可用紀錄；每日及當週仍依目前選定範圍計算，無投入的週或日期不顯示。';
+  const note=document.createElement('p');note.className='muted';note.textContent='IC＋機種 → 前段／後段 → 日期 → 製程 → 不良項目。左側列前一週、當週的黃色長條，再列所選日期的紅色長條。前一週比較採用 Detail 檔案庫可用紀錄；每日及當週仍依目前選定範圍計算，無投入的週或日期保留日期標籤與空位，良率留白。';
   const grid=stageGridTemplate.cloneNode(true);
   for(const definition of stageDefinitions){const stage={...definition,key:'model-'+index+'-'+definition.key,stageName:definition.key,productId:product.id,model,title:model+' · '+definition.title};stages.push(stage);for(const prefix of ['stage-','summary-','download-'])grid.querySelector('#'+prefix+definition.key).id=prefix+stage.key;grid.querySelector('#stage-'+stage.key).closest('article').querySelector('h3').textContent=definition.title;grid.querySelector('#download-'+stage.key).onclick=()=>downloadStageExcel(stage);}
   section.append(heading,note,grid);stageGroupsHost.append(section);
@@ -62,15 +62,16 @@ function drawStageChart(stage){
  // Draw the target after bars so it is continuous, and reserve its label above the plot.
  ctx.strokeStyle='#396ed4';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(left,ty);ctx.lineTo(width-right,ty);ctx.stroke();ctx.fillStyle='#396ed4';ctx.textAlign='right';ctx.font='600 11px system-ui';ctx.fillText('目標 '+pct(stage.target),width-right,32);
  ctx.fillStyle='#263748';ctx.textAlign='left';ctx.font='700 13px system-ui';ctx.fillText(stage.title+' 每日良率',left,17);
+ if(!measured.length){ctx.fillStyle='#687b8c';ctx.textAlign='center';ctx.font='13px system-ui';ctx.fillText('此範圍沒有投入資料',left+plotW/2,top+plotH/2);}
  const show=index=>{const row=rows[index];if(!row)return;const text=`${stage.title} · ${row.date} · ${pct(row.value)} · 投入 ${inputs[index]} PPID`;canvas.title=text;};
  const hit=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length&&rows[index].value!=null){show(index);selectStageRow(stage,rows[index]);}};canvas.onmousemove=e=>{const index=Math.floor((e.clientX-canvas.getBoundingClientRect().left-left)/slot);if(index>=0&&index<rows.length)show(index);};canvas.onclick=hit;canvas.tabIndex=0;canvas.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();const row=rows[Number(canvas.dataset.activeIndex)||0];if(row?.value!=null)selectStageRow(stage,row);return;}if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();canvas.dataset.activeIndex=String(Math.max(0,Math.min(rows.length-1,(Number(canvas.dataset.activeIndex)||0)+(e.key==='ArrowRight'?1:-1))));show(Number(canvas.dataset.activeIndex));};
- canvas.dataset.points=rows.length;canvas.setAttribute('aria-label',`${stage.title}每日良率圖；只顯示有投入PPID的日期與週，每柱標示投入PPID，點選可依日期、製程、產品、不良項目下鑽。日期範圍 ${periodStart} 至 ${periodEnd}，前一週與當週比較，加 ${stageModel(stage.key).daily.length} 個有投入日期`);
+ canvas.dataset.points=rows.length;canvas.setAttribute('aria-label',`${stage.title}每日良率圖；保留完整日期範圍、前一週與當週，無投入保留空位，每柱標示投入PPID，點選可依日期、製程、產品、不良項目下鑽。日期範圍 ${periodStart} 至 ${periodEnd}，前一週與當週比較，加 ${stageModel(stage.key).daily.length} 個日期`);
 }
 function selectStageRow(stage,row){if(row.kind==='week'){$('qualitySelection').hidden=false;$('qualitySelection').textContent=stage.title+' · '+row.date+'（'+row.start+' — '+row.end+'，依可用來源紀錄） · 製程平均 '+pct(row.value)+' · 週內扣重投入 '+row.input;return;}openStageDrill(stage,row.date);}
 async function downloadStageExcel(stage){
  await withDownloadButton($('download-'+stage.key),async()=>{
   const model=stageModel(stage.key),options={sources:[...(analysis.sources||[]),...model.weeks.flatMap(row=>row.contextSources||[])],referenceSources:analysis.referenceSources||[],linkedChartCopy:true,scope:periodStart+' — '+periodEnd+' · '+stage.title+'（含前一週比較）',inputCounts:model.chartRows.map(row=>row.input),notes:[
-   ['週別統計','依週日到週六計算，先列前一週與當週。前一週可補讀 Detail 檔案庫摘要，當週及每日依目前選定範圍計算。沒有投入的週不列，僅納入可用來源紀錄。每週各製程跨日 PPID 去重後平均製程良率。黃色為週，紅色為日。'],
+   ['週別統計','依週日到週六計算，先列前一週與當週。前一週可補讀 Detail 檔案庫摘要，當週及每日依目前選定範圍計算。當週以所選結束日決定。沒有投入的週與日期仍保留空位及標籤，良率留白；僅納入可用來源紀錄。每週各製程跨日 PPID 去重後平均製程良率。黃色為週，紅色為日。'],
    ['略過錯誤列',String(analysis.skippedRows?.length||0)+' 列；未納入投入與良率。'],
    ['篩選日期範圍','每日階段圖、下鑽及 Excel 的每日列使用目前選定日期與此 IC＋機種；前一週長條另外列為比較資料。'],
    ['唯一投入驗算','子層投入以各自PPID去重，上層取子層PPID聯集。子層投入合計減重複計入次數等於上層唯一投入；跨日總投入也採聯集。重複計入次數為多算的次數，同一片出現3個子層會扣2次。'],
@@ -79,7 +80,6 @@ async function downloadStageExcel(stage){
    ['不良項目驗算','每日階段下鑽以當日當製程PPID的不良紀錄分解，FAIL／Scrap優先，每片只列一項；各項共用該產品／製程投入母數。良品加不良項目唯一片數等於投入，1減各項不良率合計等於產品良率。全檔完整不良分析仍採跨日期、跨製程的首次不良歸屬。'],
    ['不良名稱缺漏','保留不良旗標但原始合併檔缺少項目文字時列為「未填不良項目」，不會漏掉該片。'],
   ],categoryLabels:model.chartRows.map(stageChartDateLabel),sheets:[{name:'週別統計',rows:[['週別','週起日','週迄日','納入資料起日','納入資料迄日','唯一投入','唯一不良','製程平均良率','唯一PPID比較良率'],...model.weeks.map(row=>[row.date,row.start,row.end,row.availableStart,row.availableEnd,row.input,row.count,row.value,row.uniqueYield])],percentColumns:[7,8]},{name:'每日投入數',rows:[['日期','投入唯一PPID','唯一良品PPID','唯一不良PPID','採用：製程平均良率','原報表製程平均良率','與原報表一致','唯一PPID良率（比較）','良率差異（百分點）'],...model.daily.map(row=>[row.date,row.input,row.good,row.count,row.value,row.expected,row.consistent,row.uniqueYield,row.difference==null?null:row.difference*100])],percentColumns:[4,5,7]},...stageAuditSheets(model)]};
-  if(!model.chartRows.length)throw Error('此機種／IC 在所選範圍沒有階段投入資料。');
   save(await createStageChartWorkbook({...stage,key:stage.stageName},model.chartRows,options),stage.model.replace(/[\\/:*?"<>|]/g,'_')+'_'+stage.stageName+'_每日階段良率.xlsx');
  });
 }

@@ -17,8 +17,8 @@ function calculate(period,sources,skipInvalidRows,signal){
  });
 }
 export async function attachStageWeekContext(data,context,onProgress,signal){
- const analysis=data.analysis,start=data.start_date||analysis.start_date;
- const current=calendarBuckets(start,start,'week')[0];
+ const analysis=data.analysis,end=data.end_date||analysis.end_date||data.start_date||analysis.start_date;
+ const current=calendarBuckets(end,end,'week')[0];
  const previousDay=new Date(Date.parse(current.start+'T00:00:00Z')-DAY).toISOString().slice(0,10);
  const period=periods.periodFor(previousDay,'week');
  const result={key:period.key.replace('_w','-W').replace(/_$/,''),start:period.start_date,end:period.end_date,status:'empty',products:[],sources:[]};

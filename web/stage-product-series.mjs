@@ -11,10 +11,10 @@ export function productStageSeries(analysis,productId,stage,start,end,days=[]){
  const productRows=(analysis.observations||[]).filter(row=>row.product===productId);
  const observations=productRows.filter(row=>!days.length||days.includes(row.date));
  const model=buildStageAnalysis({...analysis,products,observations},stage,start,end,[]);
- const daily=model.daily.filter(row=>(!days.length||days.includes(row.date))&&row.input>0);
+ const daily=model.daily;
  if(!daily.length)return {...model,daily,weeks:[],chartRows:[],comparisonNote:''};
 
- const current=calendarBuckets(daily.at(-1).date,daily.at(-1).date,'week')[0];
+ const current=calendarBuckets(end,end,'week')[0];
  const before=new Date(current.start+'T00:00:00Z');before.setUTCDate(before.getUTCDate()-7);
  const previous=calendarBuckets(before.toISOString().slice(0,10),before.toISOString().slice(0,10),'week')[0];
  const weeks=[];
@@ -28,12 +28,12 @@ export function productStageSeries(analysis,productId,stage,start,end,days=[]){
    const saved=context.products.find(product=>product.id===productId)?.stages.find(item=>item.stage===stage);
    if(saved){metrics=saved;availableStart=context.start;availableEnd=context.end;contextSources=context.sources||[];}
   }
-  if(metrics.input)weeks.push({
+  weeks.push({
    ...metrics,date:bucket.key,label:bucket.key,kind:'week',start:bucket.start,end:bucket.end,
    availableStart,availableEnd,contextSources
   });
  }
- const hasPrevious=weeks.some(row=>row.date===previous.key);
+ const hasPrevious=weeks[0].input>0;
  const comparisonNote=hasPrevious?'':analysis.stageWeekContext?.status==='error'
   ?previous.key+' 比較資料未載入：'+analysis.stageWeekContext.error
   :previous.key+' 沒有可用的同機種／IC 階段投入資料。';
