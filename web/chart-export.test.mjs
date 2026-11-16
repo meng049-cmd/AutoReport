@@ -16,15 +16,17 @@ test('editable stage-yield workbook includes native combo chart and preserves bl
  assert.match(await zip.file('xl/drawings/_rels/drawing1.xml.rels').async('string'),/relationships\/chart/);
  const lowBytes=await createStageChartWorkbook(stage,[{date:'2026-10-15',value:.5}]),lowZip=await JSZip.loadAsync(lowBytes);assert.match(await lowZip.file('xl/charts/chart1.xml').async('string'),/<c:min val="0\.5"\/>/);
 });
-test('stage chart export shortens date labels, keeps full source dates, and shows two-decimal values',async()=>{
+test('both stage charts use the visible short date column and display every X axis label',async()=>{
  const rows=[{date:'2026-W43',value:.997,kind:'week'},{date:'2026-11-09',value:.995,kind:'day'}];
- const title='CY26-14-Goodix · 後段 每日良率',bytes=await createStageChartWorkbook({title:'CY26-14-Goodix · 後段',target:.99,color:'#d54545'},rows,{categoryLabels:['W43','11-09'],inputCounts:[100,200]}),book=new ExcelJS.Workbook();
+ const title='CY26-14-Goodix · 後段 每日良率',bytes=await createStageChartWorkbook({title:'CY26-14-Goodix · 後段',target:.99,color:'#d54545'},rows,{categoryLabels:['W43','11-09'],inputCounts:[100,200],linkedChartCopy:true}),book=new ExcelJS.Workbook();
  await book.xlsx.load(bytes);const sheet=book.getWorksheet('每日階段良率');
- assert.equal(sheet.getCell('A2').value,'2026-W43');assert.equal(sheet.getCell('A3').value,'2026-11-09');
- assert.equal(sheet.getCell('E2').value,'W43');assert.equal(sheet.getCell('E3').value,'11-09');assert.equal(sheet.getColumn('E').hidden,true);
+ assert.equal(sheet.getCell('A2').value,'W43');assert.equal(sheet.getCell('A3').value,'11-09');
+ assert.ok(!sheet.getColumn('A').hidden);assert.equal(sheet.columnCount,4);
  const zip=await JSZip.loadAsync(bytes),chart=await zip.file('xl/charts/chart1.xml').async('string');
  assert.ok(chart.includes(`<a:t>${title}</a:t>`));assert.match(chart,/formatCode="0\.00%" sourceLinked="0"/);
- assert.match(chart,/每日階段良率'!\$E\$2:\$E\$3/);assert.match(chart,/<c:v>W43<\/c:v>/);assert.match(chart,/<c:v>11-09<\/c:v>/);
+ assert.match(chart,/每日階段良率'!\$A\$2:\$A\$3/);assert.match(chart,/<c:v>W43<\/c:v>/);assert.match(chart,/<c:v>11-09<\/c:v>/);
+ const axis=chart.match(/<c:catAx>[\s\S]*?<\/c:catAx>/)[0];assert.match(axis,/<c:tickLblPos val="low"\/>/);assert.match(axis,/<c:tickLblSkip val="1"\/>/);
+ assert.equal(await zip.file('xl/charts/chart2.xml').async('string'),chart);
  assert.doesNotMatch(chart,/2026-W43|2026-11-09|每日階段良率<\/a:t>/);
 });
 test('native chart and plotted PNG snapshot coexist with notes and source files',async()=>{
