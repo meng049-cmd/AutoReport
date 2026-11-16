@@ -84,3 +84,30 @@ if __name__ == '__main__':
     parser.add_argument('--commit')
     args = parser.parse_args()
     print(json.dumps(append_excel(args.db, args.excel, args.metadata, args.commit), ensure_ascii=False, indent=2))
+
+
+def confirmed_corrections(db):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='manual_match_corrections'").fetchone():
+        return []
+    return [json.loads(row[0]) for row in db.execute('SELECT payload FROM manual_match_corrections ORDER BY key')]
+
+
+def save_corrections(database, corrections):
+    if not corrections:
+        raise ValueError('請先套用補填結果。')
+    updates = {}
+    for item in corrections:
+        order, part = a.norm(item.get('order', '')), a.norm(item.get('part', ''))
+        ic, model = str(item.get('ic', '')).strip(), str(item.get('model', '')).strip()
+        if not order or not ic or not model:
+            raise ValueError('保存補填必須提供工單、IC 與機種。')
+        key = json.dumps([order, part], ensure_ascii=False)
+        if key in updates and (updates[key]['ic'], updates[key]['model']) != (ic, model):
+            raise ValueError('同一工單／料號存在不同補填值。')
+        updates[key] = dict(order=order, part=part, ic=ic, model=model,
+                            confirmed_at=datetime.now(timezone.utc).isoformat())
+    with sqlite3.connect(database) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS manual_match_corrections (key TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+        for key, item in updates.items():
+            db.execute('INSERT OR REPLACE INTO manual_match_corrections VALUES (?,?)', (key, json.dumps(item, ensure_ascii=False)))
+        return confirmed_corrections(db)

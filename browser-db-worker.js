@@ -50,6 +50,7 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
  py.FS.unlink('/app/'+filename);
  if(summary.unchanged){self.postMessage({id,result:{summary,reference:state?.reference||null}});return;}
  const reference=JSON.parse(await py.runPythonAsync(`with autoreport.connect('/app/data/active.sqlite3') as db:\n    records=[]\n    for row in db.execute(autoreport.RECORD_SQL+' ORDER BY r.id'):\n        r=autoreport.present(row)\n        r['search_text']=row['search_text']\n        records.append(r)\n    data={'manual_corrections':update_database.confirmed_corrections(db),'stats':autoreport.stats(db),'records':records,'keys':[list(r) for r in db.execute('SELECT kind,value,record_id FROM lookup_keys ORDER BY kind,value,record_id')]}\njson.dumps(data,ensure_ascii=False)`));
+ for(const saved of state?.reference?.manual_corrections||[]){const index=reference.manual_corrections.findIndex(item=>item.order===saved.order&&(item.part||'')===(saved.part||''));if(index>=0)reference.manual_corrections[index]=saved;else reference.manual_corrections.push(saved);}
  const uploaded=[...(state?.reference?.uploaded_files||[]),{name:filename,size:file.size,imported_at:summary.updated_at}];
  reference.uploaded_files=uploaded;reference.source_files=[...new Set(reference.records.map(r=>r.source_file))].sort();reference.database_update=summary;
  const database=py.FS.readFile('/app/data/active.sqlite3').slice().buffer;await saveBrowserDatabase({version:1,database,reference});

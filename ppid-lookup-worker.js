@@ -3,58 +3,89 @@ importScripts('vendor/xlsx.full.min.js'+version);
 
 function text(value){return String(value??'').normalize('NFKC').trim();}
 function key(value){return text(value).toLocaleUpperCase('en-US');}
-function parseList(textValue,buffer,name){
+function compact(value){return key(value).replace(/[\s_\-./\\#()：:]/g,'');}
+const ppidHeaders=new Set(['PPID','小板序號','小板序号','序號','序号','序列號','序列号','板序號','板序号','單板序號','单板序号','SERIAL','SERIALNUMBER','SERIALNO','SERIALID','小板']);
+function isPpidHeader(value){
+ const header=compact(value);
+ return ppidHeaders.has(header)||/^(?:PPID(?:NO|NUMBER|ID|SN|SERIAL|SERIALNO|KEY|編號|编号|號|号|小板序號|小板序号|序號|序号)?|(?:小板序號|小板序号|序號|序号|序列號|序列号|板序號|板序号|單板序號|单板序号)(?:PPID|SN)?|SERIAL(?:NO|NUMBER|ID)?|小板(?:序號|序号|SN))$/.test(header);
+}
+function isPpidHeaderLabel(value){return isPpidHeader(value);}
+function parseList(textValue,buffer){
  const values=[];
  if(textValue)values.push(...String(textValue).replace(/^\uFEFF/,'').split(/[\t\r\n,，;；]+/));
  if(buffer){
   const book=XLSX.read(buffer,{type:'array',dense:true,cellDates:true});
-  const headerNames=new Set(['PPID','小板序號','序號','SERIAL','SERIALNUMBER','小板']);
   for(const sheetName of book.SheetNames){
    const sheet=book.Sheets[sheetName],range=sheet?.['!ref']?XLSX.utils.decode_range(sheet['!ref']):null;if(!range)continue;
    const read=(r,c)=>{const cell=Array.isArray(sheet)?sheet[r]?.[c]:sheet[XLSX.utils.encode_cell({r,c})];return cell?.v??'';};
-   let headerRow=-1,column=0;
+   let headerRow=-1,column=range.s.c;
    for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+9);r++){
-    for(let c=range.s.c;c<=range.e.c;c++)if(headerNames.has(key(read(r,c)).replace(/[\s_\-]/g,''))){headerRow=r;column=c;break;}
+    for(let c=range.s.c;c<=range.e.c;c++)if(isPpidHeader(read(r,c))){headerRow=r;column=c;break;}
     if(headerRow>=0)break;
    }
-   const first=headerRow>=0?headerRow+1:range.s.r,startColumn=headerRow>=0?column:range.s.c;
-   for(let r=first;r<=range.e.r;r++)values.push(read(r,startColumn));
+   if(headerRow<0){if(book.SheetNames.length>1)continue;column=range.s.c;}
+   const first=headerRow>=0?headerRow+1:range.s.r;
+   for(let r=first;r<=range.e.r;r++)values.push(read(r,column));
   }
  }
  const unique=new Map();
- for(const value of values){const label=text(value);if(!label||['PPID','小板序號','序號','SERIAL','SERIALNUMBER','小板'].includes(key(label).replace(/[\s_\-]/g,'')))continue;const canonical=key(label);if(!unique.has(canonical))unique.set(canonical,label);}
- if(unique.size>10000)throw Error('一次最多查找 10,000 個 PPID，請分批輸入。');
+ for(const value of values){const label=text(value);if(!label||isPpidHeaderLabel(label))continue;const canonical=key(label);if(!unique.has(canonical))unique.set(canonical,label);}
  return [...unique].map(([canonical,label])=>({canonical,label}));
 }
 function cellValue(sheet,row,col,dense){
  const cell=dense?sheet[row]?.[col]:sheet[XLSX.utils.encode_cell({r:row,c:col})];
  if(cell?.v instanceof Date)return cell.v.toISOString().replace('T',' ').replace(/\.\d{3}Z$/,'');
- return text(cell?.v??'');
+ const value=cell?.v;return value==null?'':String(value);
 }
-function findColumn(headers,aliases,fallback){const wanted=new Set(aliases.map(value=>key(value).replace(/[\s_\-]/g,'')));const index=headers.findIndex(value=>wanted.has(key(value).replace(/[\s_\-]/g,'')));return index<0?fallback:index;}
-function searchFile({buffer,file,targets}){
- const targetMap=new Map(targets.map(item=>[item.canonical,item.label]));
- const list=XLSX.read(buffer,{type:'array',bookSheets:true}).SheetNames.filter(name=>/^detail(?:_\d+)?$/i.test(name.trim()));
- if(!list.length)return {matches:[],warning:'找不到 Detail 分頁'};
- const book=XLSX.read(buffer,{type:'array',dense:true,sheets:list,cellDates:true,cellHTML:false,cellText:false});
- const matches=[];let truncated=false;
- for(const sheetName of list){
-  const sheet=book.Sheets[sheetName],ref=sheet?.['!ref'];if(!ref)continue;const range=XLSX.utils.decode_range(ref),dense=Array.isArray(sheet),headers=[];
-  for(let c=range.s.c;c<=range.e.c;c++)headers[c]=cellValue(sheet,range.s.r,c,dense);
-  const columns={process:findColumn(headers,['製程','Process'],0),order:findColumn(headers,['工單','工單號碼','Order'],1),part:findColumn(headers,['料號','產品料號','Part'],2),serial:findColumn(headers,['小板序號','PPID','Serial','序號'],4),time:findColumn(headers,['產出時間','時間','Time','Date'],5),defect:findColumn(headers,['不良項目','不良','Defect'],7),status:findColumn(headers,['狀態','Status','Result'],8),ic:findColumn(headers,['IC','IC型號'],9),model:findColumn(headers,['機種','Model'],10)};
-  for(let r=range.s.r+1;r<=range.e.r;r++){
-   const serial=cellValue(sheet,r,columns.serial,dense),canonical=key(serial);if(!targetMap.has(canonical))continue;
-   matches.push({id:file.id,name:file.name,collection:file.collection,source:file.source,ppid:targetMap.get(canonical),process:cellValue(sheet,r,columns.process,dense),headers:headers.map((value,index)=>value||`欄位 ${index+1}`),rowData:headers.map((_,col)=>cellValue(sheet,r,col,dense)),sheet:sheetName,row:r-range.s.r+1});
-   if(matches.length>=10000){truncated=true;break;}
+function findPpidColumn(headers){
+ for(let index=0;index<headers.length;index++)if(isPpidHeader(headers[index]))return index;
+ return -1;
+}
+function readHeaders(sheet,range,dense,row){
+ const headers=[];
+ for(let c=range.s.c;c<=range.e.c;c++)headers.push(cellValue(sheet,row,c,dense));
+ return headers;
+}
+const waitingAcks=new Map();
+async function emitChunk(id,schema,rows){
+ const acknowledged=new Promise(resolve=>waitingAcks.set(id,resolve));
+ self.postMessage({id,type:'chunk',schema,rows});
+ await acknowledged;
+}
+async function searchFile({id,buffer,file,targets}){
+ const targetMap=new Map(targets.map(item=>[item.canonical,item.label])),book=XLSX.read(buffer,{type:'array',dense:true,cellDates:true,cellHTML:false,cellText:false});
+ let matches=0,sheetsScanned=0,batch=[];
+ for(const sheetName of book.SheetNames){
+  const sheet=book.Sheets[sheetName],ref=sheet?.['!ref'];if(!ref)continue;
+  const range=XLSX.utils.decode_range(ref),dense=Array.isArray(sheet),scanEnd=Math.min(range.e.r,range.s.r+49);
+  let headerRow=-1,serialColumn=-1,headers=[],headerScore=-1;
+  for(let r=range.s.r;r<=scanEnd;r++){
+   const candidate=readHeaders(sheet,range,dense,r),column=findPpidColumn(candidate);
+   const score=candidate.filter(value=>String(value).trim()).length;
+   if(column>=0&&score>headerScore){headerRow=r;serialColumn=range.s.c+column;headers=candidate;headerScore=score;}
   }
-  if(truncated)break;
+  if(headerRow<0&&/^detail(?:_\d+)?$/i.test(sheetName.trim())){
+   headerRow=range.s.r;serialColumn=Math.min(range.s.c+4,range.e.c);headers=readHeaders(sheet,range,dense,headerRow);
+  }
+  if(headerRow<0)continue;
+  sheetsScanned++;
+  headers=headers.map((value,index)=>String(value).trim()?value:`欄位 ${range.s.c+index+1}`);
+  const schema={id:`${file.id}\u0000${sheetName}`,sheet:sheetName,headers};
+  for(let r=headerRow+1;r<=range.e.r;r++){
+   const ppid=cellValue(sheet,r,serialColumn,dense),canonical=key(ppid);if(!targetMap.has(canonical))continue;
+   const rowData=[];for(let c=range.s.c;c<=range.e.c;c++)rowData.push(cellValue(sheet,r,c,dense));
+   batch.push({ppid:targetMap.get(canonical),row:r+1,rowData});matches++;
+   if(batch.length>=500){await emitChunk(id,schema,batch);batch=[];}
+  }
+  if(batch.length){await emitChunk(id,schema,batch);batch=[];}
  }
- return {matches,truncated};
+ return {matches,sheetsScanned};
 }
-self.onmessage=({data})=>{
+self.onmessage=async({data})=>{
+ if(data.type==='ack'){const resolve=waitingAcks.get(data.id);if(resolve){waitingAcks.delete(data.id);resolve();}return;}
  try{
-  if(data.type==='parse')self.postMessage({id:data.id,ppids:parseList(data.text,data.buffer,data.name)});
-  else if(data.type==='search')self.postMessage({id:data.id,...searchFile(data)});
-  else self.postMessage({id:data.id,error:'未知查找操作。'});
- }catch(error){self.postMessage({id:data.id,error:error.message||'檔案無法讀取。'});}
+  if(data.type==='parse')self.postMessage({id:data.id,type:'result',ppids:parseList(data.text,data.buffer)});
+  else if(data.type==='search')self.postMessage({id:data.id,type:'complete',...await searchFile(data)});
+  else self.postMessage({id:data.id,type:'result',error:'未知查找操作。'});
+ }catch(error){self.postMessage({id:data.id,type:'complete',error:error.message||'檔案無法讀取。'});}
 };
