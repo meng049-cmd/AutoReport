@@ -35,10 +35,19 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
    const order=terms.find(([kind])=>kind==='order')?.[1]||item.order,part=terms.find(([kind])=>kind==='part')?.[1]||'';
    const index=corrections.findIndex(row=>row.order===order&&(row.part||'')===part);
    const saved={order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
+   if(item.override||corrections[index]?.override)Object.assign(saved,{override:true,family:item.override?item.family||'':corrections[index].family||''});
    if(index>=0)corrections[index]=saved;else corrections.push(saved);
   }
+  const py=await initialize(),path='/app/data/corrections.sqlite3';
+  py.FS.writeFile(path,state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3'));
+  let database;
+  try{
+   py.globals.set('correction_payload',JSON.stringify(corrections));
+   await py.runPythonAsync("import json; update_database.save_corrections('/app/data/corrections.sqlite3', json.loads(correction_payload))");
+   database=py.FS.readFile(path).slice().buffer;
+  }finally{py.FS.unlink(path);}
   const reference={...current,manual_corrections:corrections};
-  await saveBrowserDatabase({version:1,database:state?.database||null,reference});
+  await saveBrowserDatabase({version:1,database,reference});
   self.postMessage({id,result:{reference,count:file.length}});return;
  }
  if(!file||!/\.xlsx$/i.test(file.name)||!file.size||file.size>100*1024*1024)throw Error('請選擇一份 100 MB 以內的 .xlsx 原始對照檔。');

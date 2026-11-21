@@ -28,10 +28,11 @@ export class Matcher {
   source(r){return {'檔案':r.source_file,'分頁':r.sheet,'列號':r.row_number,'原始IC／機型':r.raw_ic,'整理依據':r.resolution};}
   lookup(criteria){
     const terms=criteria.map(([kind,value])=>[kind,norm(['order','any'].includes(kind)?orderNumber(value)||firstText(value):firstText(value))]);
-    const order=terms.find(([kind])=>kind==='order')?.[1],part=terms.find(([kind])=>kind==='part')?.[1]||'';
-    const saved=(this.data.manual_corrections||[]).find(item=>item.order===order&&item.part===part);
+    const order=terms.find(([kind])=>kind==='order')?.[1]||(terms.length===1&&terms[0][0]==='any'?terms[0][1]:undefined),part=terms.find(([kind])=>kind==='part')?.[1]||'';
+    const corrections=(this.data.manual_corrections||[]).filter(item=>item.order===order);
+    const saved=corrections.find(item=>item.part===part)||corrections.find(item=>item.override&&item.part==='');
     if(saved){
-      const candidate={'機種':saved.model,IC:saved.ic,'產品系列':[],'來源':[{'檔案':'已確認補填對照','分頁':'工單 IC／機種補填','列號':1,'整理依據':['確認時間：'+saved.confirmed_at]}]};
+      const candidate={'機種':saved.model,IC:saved.ic,'產品系列':saved.family?[saved.family]:[],'來源':[{'檔案':'已確認補填對照','分頁':'工單 IC／機種補填','列號':1,'整理依據':['確認時間：'+saved.confirmed_at]}]};
       return {'狀態':'唯一匹配','候選':[candidate],'查找條件':criteria.map(([kind,value])=>({'欄位類別':kind,'查找值':firstText(value),'找到候選組數':1})),'查找依據':candidate['來源']};
     }
     const sets=[],all=new Map(),evidence=new Map(),resolved=[];

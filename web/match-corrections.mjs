@@ -1,12 +1,12 @@
 import {norm,text} from './matcher.mjs';
 
-export function correctionOptions(records=[]){
+export function correctionOptions(records=[],{includeFamily=false}={}){
  const collect=field=>{
   const values=new Map(),missing=new Set(['','-','n/a','na','none','无','未知']);
   for(const record of records){const value=text(record[field]),key=norm(value);if(!missing.has(key)&&!values.has(key))values.set(key,value);}
   return [...values.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true}));
  };
- return {ics:collect('ic'),models:collect('model')};
+ return {ics:collect('ic'),models:collect('model'),...(includeFamily?{families:collect('family')}:{})};
 }
 
 export function canonicalCorrectionName(value,options=[]){

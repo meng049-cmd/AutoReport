@@ -1,5 +1,5 @@
 import '../browser-storage.js';
-import {Matcher} from './matcher.mjs';
+import {Matcher,norm} from './matcher.mjs';
 import {matchFile,exportMatches} from './files.mjs';
 import {applyMatchCorrections,summarizeMatchCorrections,summarizeResolvedPPIDMappings,correctionOptions} from './match-corrections.mjs';
 let matcher,lastResult;
@@ -9,7 +9,14 @@ self.onmessage=async({data:{id,type,payload}})=>{
     await ready;let result;
     if(type==='refresh'){const local=await readBrowserDatabase();const reference=local?.reference||await(await fetch(new URL('../reference.json',import.meta.url),{cache:'no-store'})).json();matcher=new Matcher(reference);lastResult=null;result=true;}
     else if(type==='reload'){matcher=new Matcher(payload.reference);lastResult=null;result=true;}
-    else if(type==='stats')result={...matcher.data.stats,confirmedCorrectionCount:(matcher.data.manual_corrections||[]).length,database_update:matcher.data.database_update,cleared_at:matcher.data.cleared_at,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files,correctionOptions:correctionOptions([...matcher.data.records,...(matcher.data.manual_corrections||[])])};
+    else if(type==='stats')result={...matcher.data.stats,orders:[...new Set([...matcher.data.keys.filter(([kind])=>kind==='order').map(([,value])=>value),...(matcher.data.manual_corrections||[]).map(item=>item.order)])],confirmedCorrectionCount:(matcher.data.manual_corrections||[]).length,database_update:matcher.data.database_update,cleared_at:matcher.data.cleared_at,uploaded_files:matcher.data.uploaded_files,source_files:matcher.data.source_files,correctionOptions:correctionOptions([...matcher.data.records,...(matcher.data.manual_corrections||[])],{includeFamily:true})};
+    else if(type==='orderCorrection'){
+      const {order,part}=payload;
+      const records=[...matcher.ids('order',order)].map(id=>matcher.records.get(id));
+      const saved=(matcher.data.manual_corrections||[]).filter(item=>item.order===norm(order));
+      const parts=[...new Set([...records.flatMap(record=>record.parts),...saved.map(item=>item.part)].filter(Boolean))];
+      result={parts,candidates:matcher.lookup([['order',order],...(part?[['part',part]]:[])])['候選']};
+    }
     else if(type==='query')result=matcher.lookup([[payload.kind,payload.query]]);
     else if(type==='search')result=matcher.search(payload.query);
     else if(type==='match'){lastResult=null;const forcedKeys=new Set(payload.forceCorrectionKeys||[]),corrections=(payload.corrections||[]).filter(item=>!forcedKeys.has(item.key));lastResult=applyMatchCorrections(await matchFile(matcher,payload.bytes,payload.filename,{analysisOnly:true,forceCorrectionKeys:[...forcedKeys]}),corrections,correctionOptions([...matcher.data.records,...(matcher.data.manual_corrections||[])]));const counts={};for(const row of lastResult['結果'])counts[row['狀態']]=(counts[row['狀態']]||0)+1;result={'檔名':lastResult['檔名'],'筆數':lastResult['筆數'],'提示':lastResult['提示'],counts,corrections:summarizeMatchCorrections(lastResult),identityMappings:summarizeResolvedPPIDMappings(lastResult),detail:Boolean(lastResult.detailBytes||lastResult.compactDetail),excludedRows:lastResult.excludedRows||0};}

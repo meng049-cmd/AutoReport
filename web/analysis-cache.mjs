@@ -21,8 +21,8 @@ export async function getAnalysisCache({reportId,selectionKey}={}){
  if(!reportId&&selectionKey){const alias=await read('selection:'+selectionKey);reportId=alias?.reportId;}
  if(!reportId)return null;return read('report:'+reportId);
 }
-export async function saveAnalysisCache(reportId,data,{selectionKey,inputIds=[],downloadBlob}={}){
- const {bytes,merged,...result}=data,generation=epoch,record={key:'report:'+reportId,version:version(),reportId,data:result,downloadBlob,reportSchema:typeof data.includes_detail==='boolean'?1:undefined,periodSchema:data.includes_detail===false?1:undefined};remember(record);
+export async function saveAnalysisCache(reportId,data,{selectionKey,inputIds=[],downloadBlob,correctionRevision}={}){
+ const {bytes,merged,...result}=data,generation=epoch,record={key:'report:'+reportId,version:version(),reportId,data:result,downloadBlob,correctionRevision,reportSchema:typeof data.includes_detail==='boolean'?1:undefined,periodSchema:data.includes_detail===false?1:undefined};remember(record);
  const alias=selectionKey?{key:'selection:'+selectionKey,version:version(),reportId,inputIds}:null;if(alias)remember(alias);
  await ready;if(generation!==epoch)return;try{await transaction('readwrite',store=>{store.put(record);if(alias)store.put(alias);});return Boolean(db);}catch{return false;}
 }

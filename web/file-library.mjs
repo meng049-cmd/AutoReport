@@ -18,8 +18,8 @@ function write(mode,action){return new Promise((resolve,reject)=>{if(!db){reject
 export function listLibraryFiles({includeHistory=false}={}){return [...entries.values()].filter(item=>includeHistory||!item.matchHistory).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));}
 export function libraryCollection(entry){return entry.matchHistory?'history':['raw','detail','mergedDetail','analysis'].includes(entry.collection)?entry.collection:entry.kind==='raw'?'raw':['analysis','input'].includes(entry.kind)?'analysis':'detail';}
 function historyFor(entry){return {...entry,id:'history:'+crypto.randomUUID(),matchHistory:true,originalId:entry.id,originalCollection:libraryCollection(entry),archivedAt:new Date().toISOString(),persistent:true};}
-export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null,collection,sourceFileId,replaceId}={}){
- await libraryReady;const previous=replaceId?entries.get(replaceId):null;const entry={id:previous?.id||crypto.randomUUID(),name:file.name,blob:file,size:file.size,lastModified:file.lastModified,kind,detail,sources,rows,collection:libraryCollection({kind,collection}),sourceFileId,createdAt:previous?.createdAt||new Date().toISOString(),persistent:true};
+export async function addLibraryFile(file,{kind='matched',detail=true,sources=[],rows=null,collection,sourceFileId,replaceId,analysisInputs}={}){
+ await libraryReady;const previous=replaceId?entries.get(replaceId):null;const entry={id:previous?.id||crypto.randomUUID(),name:file.name,blob:file,size:file.size,lastModified:file.lastModified,kind,detail,sources,rows,collection:libraryCollection({kind,collection}),sourceFileId,analysisInputs,createdAt:previous?.createdAt||new Date().toISOString(),persistent:true};
  const retain=['raw','matched'].includes(kind),history=retain?historyFor(entry):null;
  const previousHistory=retain&&previous&&!previous.matchHistory&&!entries.has(previous.historyId)?historyFor(previous):null;
  if(history)entry.historyId=history.id;

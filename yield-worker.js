@@ -25,10 +25,12 @@ self.onmessage=async({data})=>{try{
 
  timings.read=performance.now()-started;let phase=performance.now();
  self.postMessage({type:'progress',message:'正在計算每日製程與階段良率…'});
- await resolveConfirmedProducts(merger);
+ const appliedCorrections=new Set();
+ await resolveConfirmedProducts(merger,appliedCorrections);
  const analysis=analyzeQuality(merger);analysis.skippedRows=merger.skippedRows;
  timings.quality=performance.now()-phase;phase=performance.now();
  analysis.sources=data.sources||[...merger.sources].map(name=>({name,kind:'Detail'}));analysis.referenceSources=data.referenceSources||[];try{const saved=files.length===1?JSON.parse(inputBook?.Custprops?.AutoReportReferenceSources||'null'):null;if(Array.isArray(saved)&&saved.every(name=>typeof name==='string'))analysis.referenceSources=saved;}catch{}inputBook=null;
+ analysis.workOrderCorrections=[...appliedCorrections];
  const {book,calculation,...stats}=buildYieldReport(merger,analysis.identities,{includeDetail:!indexed,period});applyProductPPIDYield(analysis);
  if(indexed){merger.rows.clear();merger.defectKeys.clear();merger.firstNG.clear();merger.analysisFirstNG.clear();analysis.identities.clear();}
  analysis.period=period;stats.includes_detail=!indexed;
@@ -37,6 +39,10 @@ self.onmessage=async({data})=>{try{
  timings.daily=performance.now()-phase;phase=performance.now();
  self.postMessage({type:'progress',message:'正在分析不良歸屬、排名與總良率…'});
  appendQualitySheets(XLSX,book,analysis);
+ if(appliedCorrections.size){
+  const rows=[['工單','料號','IC','機種','產品系列'],...[...appliedCorrections].map(({order,part,ic,model,family})=>[order,part,ic,model,family||''])];
+  XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),'工單對照修改');
+ }
  timings.sheets=performance.now()-phase;
  const jsonMetadata=value=>JSON.stringify(value).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));book.Custprops.AutoReportSources=jsonMetadata(analysis.sources.map(source=>source.name));book.Custprops.AutoReportReferenceSources=jsonMetadata(analysis.referenceSources);
  // Analysis does not create an intermediate merged workbook.

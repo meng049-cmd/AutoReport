@@ -106,6 +106,8 @@ def save_corrections(database, corrections):
             raise ValueError('同一工單／料號存在不同補填值。')
         updates[key] = dict(order=order, part=part, ic=ic, model=model,
                             confirmed_at=datetime.now(timezone.utc).isoformat())
+        if item.get('override'):
+            updates[key].update(override=True, family=str(item.get('family', '')).strip())
     with sqlite3.connect(database) as db:
         db.execute('CREATE TABLE IF NOT EXISTS manual_match_corrections (key TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         for key, item in updates.items():
