@@ -4,11 +4,11 @@ import {analyzeYieldFiles,getYieldOptions} from './yield-ui.mjs';
 import {runWeeklyTrend} from './weekly-trend-ui.mjs';
 const $=id=>document.getElementById(id),metas=new Map(),choices=new Map();
 let range=null,selected=[],signature='',refreshing=false,indexing=false,controller;
-const entries=()=>listLibraryFiles().filter(item=>item.detail&&libraryCollection(item)===$('yieldRangeSource').value);
+const entries=()=>listLibraryFiles().filter(item=>item.detail&&libraryCollection(item)==='detail');
 function validMeta(item){const meta=metas.get(item.id);return meta?.key===indexKey(entryFile(item),item.id)?meta:null;}
 function update(){
  const files=entries(),indexed=files.filter(validMeta),busy=libraryIsBusy()||refreshing;
- for(const id of ['yieldRangeSource','yieldRangeMode','yieldRangeStart','yieldRangeEnd','yieldIndexDates'])$(id).disabled=busy;
+ for(const id of ['yieldRangeMode','yieldRangeStart','yieldRangeEnd','yieldIndexDates'])$(id).disabled=busy;
  $('weeklyTrendAxis').disabled=$('weeklyTrendCalculate').disabled=$('yieldCalculate').disabled=busy||!range||!selected.length||indexed.length!==files.length;
  $('yieldIndexDates').disabled=busy||!files.length;
  if(indexing)return;
@@ -36,7 +36,7 @@ async function refresh(force=false){
  catch(error){$('yieldRangeStatus').textContent=error.message;}
  finally{refreshing=false;populate();}
 }
-$('yieldRangeSource').onchange=()=>refresh(true);$('yieldRangeMode').onchange=populate;
+$('yieldRangeMode').onchange=populate;
 $('yieldRangeStart').onchange=()=>apply('start');$('yieldRangeEnd').onchange=()=>apply('end');
 $('yieldCancelDateIndex').onclick=()=>controller?.abort();
 $('yieldIndexDates').onclick=async()=>{
